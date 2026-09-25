@@ -486,7 +486,35 @@ luci-theme-argon   ✅ 不在（勾了 FanchmWrt，主题让位）
 
 （待填：CI 上全新克隆的实测耗时 —— 那才是用户实际会遇到的时间）
 
-### 5.4 QEMU 实机验证
+### 5.4 上游跟进检查
+
+`upstream-watch.yml` 在 GitHub Actions 上**手动触发实测通过**（全新克隆环境）：
+
+| 步骤 | 结果 |
+|---|---|
+| 准备源码树（`SKIP_BUILD=1 ./build.sh`） | ✅ |
+| 检查上游（`check-upstream.sh --deep`） | ✅ 退出码 0 |
+| 写进运行摘要 | ✅ |
+| 把 vendor 更新推成 PR | ⏭️ 正确跳过（无变化） |
+| 内核补丁失效时开 Issue | ⏭️ 正确跳过（无变化） |
+
+报告里关键的两行：
+
+```
+## ✅ FanchmWrt vendor 与上游一致
+
+## 内核补丁兼容性
+✅ 能应用
+`make target/linux/prepare` 成功，内核 + 全部补丁（含 950-fwx）都打上了。
+```
+
+**「能应用」这一条是重点**：它说明 `--deep` 真的跑了 `make target/linux/prepare`，
+不是因为没有源码树而被跳过。这恰好是本项目最脆弱的一环 —— 内核补丁一旦打不上，
+所有人勾 FanchmWrt 的构建都会失败，而报错指向 fwx 源码、根因在内核侧。
+
+`check-all-combos.sh` 也在本地与 CI 上各跑通过一次（本地约 10 分钟，CI 上 6m22s）。
+
+### 5.5 QEMU 实机验证
 
 **没有做。** 这份固件没有在 QEMU 或真机上启动过，以下都未经验证：
 
