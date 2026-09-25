@@ -53,6 +53,9 @@ export PROJECT_ROOT
 
 . "$PROJECT_ROOT/scripts/lib.sh"
 
+# 独占锁：防止同一个工作区里两个构建互相踩（原因见 scripts/lib.sh）。
+acquire_lock
+
 JOBS="${1:-$(nproc)}"
 
 # --- 参数规范化 -------------------------------------------------------------

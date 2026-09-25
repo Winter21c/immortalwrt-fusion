@@ -166,7 +166,8 @@ uci-defaults 去设 `luci.main.mediaurlbase`；argon 那边也有类似的脚本
 
 ### 4.9 砍掉 dockerd 补丁：别为了「和某个发行版一致」替换能工作的实现
 
-**现象**：`patches/0001-dockerd-istoreos.patch`（从现有项目继承来的）
+**现象**：从现有项目继承来的 `patches/0001-dockerd-istoreos.patch`
+（**本仓库里已经没有这个文件了**，下面说的就是为什么删掉它）
 在 ImmortalWrt 的 dockerd 上既不匹配正向也不匹配反向。
 
 **排查**：先对比两边，再读代码。结论比「补丁打不上」重要得多：
