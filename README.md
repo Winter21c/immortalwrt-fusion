@@ -328,21 +328,61 @@ immortalwrt-fusion/
 | 镜像配置 | 断言 TARGZ / INITRAMFS / CPIOGZ 均为关，只出 4 个镜像 |
 | 第三方 feed 与底座撞名 | 剪枝 + 索引重建，实测剪掉 `luci-app-cpufreq` |
 | vendored 包与树内重名 | 铺装前拦截（实测拦下 `fullconenat` / `fullconenat-nft`） |
-| 编译后固件里真实的包列表 | 对照 `*.manifest` 核对 |
-| 镜像 sha256 校验和 | 发布前核对 |
+| **完整编译（FanchmWrt + iStoreOS + Docker）** | ✅ 通过，零错误 |
+| 编译后固件里真实的包列表 | ✅ 对照 `*.manifest` 核对：513 个包，该有的都在、不要的都不在 |
+| 镜像数量与 sha256 校验和 | ✅ 4 个镜像，校验和全部通过 |
+| **DPI 内核模块编到 ImmortalWrt 内核上** | ✅ 固件里是 `kmod-fwx 6.12.108-r1`，`.ko` 落在 `lib/modules/6.12.108/fwx.ko` |
 
-**完整编译的实测结果**见 [docs/BUILD-NOTES.md](docs/BUILD-NOTES.md) 第 5 节 ——
-那里记录了耗时、产物大小与核验输出，以及编译过程中暴露出的问题。
+完整编译的实测数据（版本、大小、耗时）见
+[docs/BUILD-NOTES.md](docs/BUILD-NOTES.md) 第 5 节。
+
+> 前两次编译是**失败的**，而且失败得有价值 —— 它们暴露了两个只看代码绝对
+> 发现不了的问题：fwx 需要一处内核改动、mosdns 的二进制与界面必须成对。
+> 两个问题的完整排查过程都记在 BUILD-NOTES 里。
 
 ### 没法在这里验证的
 
-这几项刷到真机后请自行确认：
+**这份固件从来没有启动过。** 编译通过 ≠ 能启动 —— 尤其是勾了 FanchmWrt
+的时候，那个版本改过内核。以下全部需要你刷上去自己确认：
 
-- **fwx 的应用识别** 需要真实流量才有意义，空跑看不出来
+- 能否正常启动、LuCI 能否打开
+- FanchmWrt 主题与仪表盘是否生效、**高级 / 普通模式**能否切换
+- QuickStart 是否真的是首页
+- **fwx 内核模块能否加载** —— 这一版改过内核，这是第一件要确认的事
+- Docker 能否起来、存储驱动是否为 `overlay2`
+- mosdns / OpenClash 的服务状态
+
+刷机后建议先跑这几条：
+
+```sh
+# 1. 内核模块加载了吗（勾了 FanchmWrt 才有）
+lsmod | grep fwx
+dmesg | grep -i fwx | tail -20
+
+# 2. 服务状态
+/etc/init.d/fwxd status 2>/dev/null
+/etc/init.d/mosdns status 2>/dev/null
+/etc/init.d/dockerd status 2>/dev/null
+docker info 2>/dev/null | grep -i "storage driver"
+
+# 3. 这次固件是用什么参数编的
+cat /etc/build-options
+
+# 4. 管理地址与主题
+uci get network.lan.ipaddr
+uci get luci.main.mediaurlbase
+```
+
+其他未验证项：
+
+- **fwx 的应用识别效果** 需要真实流量才有意义，空跑看不出来
 - **iStore 能否拉到应用列表** 取决于外网连通性，与固件本身无关
 - **OpenClash** 内核需要联网下载，分流效果取决于你的订阅规则
 - **升级路径** 从 FanchmWrt 或 iStoreOS 直接升到本固件、以及反向回去，
   都没有验证过。跨发行版升级请当作全新刷机
+
+> `cat /etc/build-options` 那一条是特意留的：设备上直接读这个文件，
+> 比回头去翻 GitHub Actions 的日志快得多。
 
 ---
 

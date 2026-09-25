@@ -408,11 +408,68 @@ prepare。（这一条是核对 makefile 确认的，不是推测。）
 
 ### 5.2 完整编译
 
-（待填：首次真编的耗时、产物大小、核验结果）
+组合：FanchmWrt + iStoreOS + Docker，LAN 192.168.1.1，rootfs 1024MB。
+本机 12 核（i7-1355U）/ 31GB。
 
-### 5.3 QEMU 实机验证
+**前两次编译都是失败的**，而且失败得有价值 —— 它们暴露了两个只看代码
+绝对发现不了的问题（详见 4.12 与 4.6）。第三次通过。
 
-（待填：如果做了的话）
+| 项目 | 结果 |
+|---|---|
+| 编译结果 | ✅ 通过，零错误 |
+| `scripts/09-verify.sh` | ✅ 产物核验全部通过 |
+| 镜像 | 4 个，与设计一致：squashfs-combined-efi / squashfs-combined / ext4-combined-efi / ext4-combined |
+| 镜像大小 | squashfs 各 125MB，ext4 各 157MB |
+| sha256sums | 全部校验通过 |
+| 固件内软件包 | 513 个 |
+| 本次耗时 | 约 26 分钟 —— 但这是**增量重编**（build_dir 里已有前两次的产物），不是冷编译，不能当参考值 |
+
+**从固件里读出来的真实版本**（不是 `.config` 里写了什么，是固件里到底装了什么）：
+
+| 包 | 版本 |
+|---|---|
+| `kmod-fwx` | `6.12.108-r1` ← **DPI 内核模块确实编到了 ImmortalWrt 的 6.12.108 内核上** |
+| `fwxd` | `1.0.4-r1` |
+| `mosdns` | `5.3.4-r14` ← 与界面同源（sbwml 配套版本） |
+| `luci-app-mosdns` | `1.7.14-r1` |
+| `luci-theme-fanchmwrt` | 在固件里 |
+| `luci-app-quickstart` | `0.12.10-r1` |
+| `luci-app-store` | `0.2.1-r1` |
+| `dockerd` | `29.6.1-r1` |
+| `luci-app-openclash` | `0.47.156` |
+| `luci-app-ttyd` | `26.249.28459~d6167ea` |
+| `build-defaults` | 在固件里（承载管理地址与主题锁定） |
+
+**反向核对**（这些是明确不要的，逐个确认确实不在固件里）：
+
+```
+luci-app-ddns      ✅ 不在
+luci-app-hd-idle   ✅ 不在
+luci-app-wol       ✅ 不在
+luci-app-samba4    ✅ 不在
+luci-theme-argon   ✅ 不在（勾了 FanchmWrt，主题让位）
+```
+
+`kmod-fwx` 的 `.ko` 落点是 `lib/modules/6.12.108/fwx.ko`，870KB —
+与固件里 `kmod-fwx 6.12.108-r1` 的版本号对得上。
+
+### 5.3 冷编译耗时
+
+（待填：CI 上全新克隆的实测耗时 —— 那才是用户实际会遇到的时间）
+
+### 5.4 QEMU 实机验证
+
+**没有做。** 这份固件没有在 QEMU 或真机上启动过，以下都未经验证：
+
+- 能否正常启动、LuCI 能否打开
+- FanchmWrt 主题与仪表盘是否真的生效、高级/普通模式能否切换
+- QuickStart 首页是否真的是首页
+- fwx 内核模块能否加载（`dmesg | grep fwx`、`lsmod`）
+- Docker 能否起来、存储驱动是否为 overlay2
+- mosdns / OpenClash 的服务状态
+
+**编译通过 ≠ 能启动。** 尤其这一版改过内核，`kmod-fwx` 能否加载是需要
+实测确认的第一件事。刷机前请先备份，并准备好回滚方案。
 
 ---
 
