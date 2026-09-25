@@ -69,7 +69,11 @@ SKIP_FEEDS_UPDATE=$(normalize_bool "${SKIP_FEEDS_UPDATE:-0}" 0)
 
 LAN_IP="${LAN_IP:-192.168.1.1}"
 ROOTFS_PARTSIZE="${ROOTFS_PARTSIZE:-1024}"
-IMMORTALWRT_REF="${IMMORTALWRT_REF:-openwrt-25.12}"
+
+# 上游版本不再写死在这里 —— 统一从 upstreams.conf 读。
+# 环境变量仍然优先（load_upstreams 只填没设置的），所以临时试一个 ref
+# 依然可以直接 IMMORTALWRT_REF=xxx ./build.sh。
+load_upstreams
 
 export WITH_FANCHMWRT WITH_ISTOREOS ENABLE_DOCKER SKIP_FEEDS_UPDATE
 export LAN_IP ROOTFS_PARTSIZE IMMORTALWRT_REF

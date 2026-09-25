@@ -38,6 +38,50 @@ esac
 mkdir -p "$GEN"
 
 # ---------------------------------------------------------------------------
+# enumerate_fanchmwrt_pkgs
+#
+# 从 vendor/fanchmwrt/ 枚举这一层实际提供的包。输出每行一个包名。
+#
+# 为什么枚举而不是写死清单：上游新增一个 luci-app-fwx-* 时，写死的清单会
+# **静默地**把它漏掉 —— 构建成功、断言全过、固件里却没有新功能。这种漏掉
+# 比构建失败更糟，因为没有任何信号。枚举之后「vendor 里有什么就编什么」。
+#
+# 之所以安全：vendor/ 的内容不会自己变，上游更新要走 upstream-watch 开的
+# PR、人工看过 diff 才合并。所以自动跟上不等于自动引入没看过的东西。
+#
+# 唯一不枚举的是 fwx 内核模块：它是 KernelPackage/fwx，产出的包名是
+# kmod-fwx，与源码目录名不同，写死在 config/20-fanchmwrt.config 里。
+# ---------------------------------------------------------------------------
+enumerate_fanchmwrt_pkgs() {
+	for _d in "$PROJECT_ROOT"/vendor/fanchmwrt/package/fcm/*/ \
+	          "$PROJECT_ROOT"/vendor/fanchmwrt/feeds/fanchmwrt/*/; do
+		[ -f "$_d/Makefile" ] || continue
+		# tr 里必须带 \r：上游有 7 个 luci-app-fwx-* 的 Makefile 是 CRLF 行尾，
+		# PKG_NAME 取出来会带一个回车。不删掉的话写进 .config 就是
+		#     CONFIG_PACKAGE_luci-app-fwx-app-center\r=y
+		# kconfig 认不出这个符号，**静默丢弃** —— 构建成功、固件里却没有那几个
+		# 应用。这个坑真踩过：17 个应用丢了 7 个，只有断言把「该有却没有」
+		# 报出来才被发现。
+		_n=$(sed -n 's/^PKG_NAME:=//p' "$_d/Makefile" 2>/dev/null | head -1 | tr -d ' \t\r\n')
+		# luci.mk 建包的主题/应用可能没有 PKG_NAME，包名就等于目录名。
+		[ -n "$_n" ] || _n=$(basename "$_d")
+		# 内核模块由 config 片段显式声明，这里跳过，免得重复。
+		[ "$_n" = "fwx" ] && continue
+
+		# 格式哨兵：包名只允许字母数字与 . _ + -
+		# 上面那个 CR 的教训是「带进来的脏字符会导致静默丢弃」，所以这里
+		# 宁可当场失败，也不要把一个 kconfig 认不出的名字写进配置。
+		case "$_n" in
+			*[!A-Za-z0-9._+-]*)
+				die "从 $_d 解析出的包名含有非法字符，已中止：
+     '$_n'
+     多半是 Makefile 的行尾符或空白没清干净。修 enumerate_fanchmwrt_pkgs 里的 tr。" ;;
+		esac
+		printf '%s\n' "$_n"
+	done | sort -u
+}
+
+# ---------------------------------------------------------------------------
 # 1. 拼 .config
 # ---------------------------------------------------------------------------
 say "生成 .config（FanchmWrt=$WITH_FANCHMWRT iStoreOS=$WITH_ISTOREOS Docker=$ENABLE_DOCKER）"
@@ -54,6 +98,11 @@ say "生成 .config（FanchmWrt=$WITH_FANCHMWRT iStoreOS=$WITH_ISTOREOS Docker=$
 	if [ "$WITH_FANCHMWRT" = "1" ]; then
 		printf '\n'
 		cat "$PROJECT_ROOT/config/20-fanchmwrt.config"
+		printf '\n# --- 以下由 scripts/04-config.sh 从 vendor/fanchmwrt/ 枚举生成 ---\n'
+		printf '# 上游新增应用会自动出现在这里，不需要改任何配置文件。\n'
+		for _p in $(enumerate_fanchmwrt_pkgs); do
+			printf 'CONFIG_PACKAGE_%s=y\n' "$_p"
+		done
 	fi
 
 	if [ "$WITH_ISTOREOS" = "1" ]; then
@@ -180,7 +229,7 @@ WITH_ISTOREOS=$WITH_ISTOREOS
 ENABLE_DOCKER=$ENABLE_DOCKER
 LAN_IP=${LAN_IP:-（未指定，保持 ImmortalWrt 默认 192.168.1.1）}
 ROOTFS_PARTSIZE=$ROOTFS_PARTSIZE
-IMMORTALWRT_REF=${IMMORTALWRT_REF:-openwrt-25.12}
+IMMORTALWRT_REF=${IMMORTALWRT_REF:-（未设置）}
 IMMORTALWRT_SHA=$(cat "$SRC/.immortalwrt-sha" 2>/dev/null || echo unknown)
 THEME=${THEME_NAME:-ImmortalWrt 默认}
 EOF
@@ -219,15 +268,13 @@ MUST_HAVE="$MUST_HAVE kmod-nft-fullcone luci-compat"
 MUST_NOT_HAVE="luci-app-ddns luci-app-hd-idle luci-app-wol luci-app-samba4 autosamba"
 
 # --- FanchmWrt 层 ---
-FANCHM_PKGS="kmod-fwx fwxd libfwx_common luci-theme-fanchmwrt"
-FANCHM_PKGS="$FANCHM_PKGS luci-app-fwx-dashboard luci-app-fwx-dashboard-setting"
-FANCHM_PKGS="$FANCHM_PKGS luci-app-fwx-app-center luci-app-fwx-appfilter luci-app-fwx-feature"
-FANCHM_PKGS="$FANCHM_PKGS luci-app-fwx-macfilter luci-app-fwx-mac-blacklist"
-FANCHM_PKGS="$FANCHM_PKGS luci-app-fwx-network luci-app-fwx-wireless"
-FANCHM_PKGS="$FANCHM_PKGS luci-app-fwx-record luci-app-fwx-record-whitelist"
-FANCHM_PKGS="$FANCHM_PKGS luci-app-fwx-resources luci-app-fwx-session-stat"
-FANCHM_PKGS="$FANCHM_PKGS luci-app-fwx-system luci-app-fwx-traffic-stat"
-FANCHM_PKGS="$FANCHM_PKGS luci-app-fwx-user luci-app-fwx-user-record"
+#
+# 断言清单与配置清单来自**同一个枚举函数**，这是刻意的：
+# 两者要是各写一份，上游加包时可能只更新了一边 —— 配置里编了、断言却不查，
+# 或者反过来断言要查、配置却没编。同一个来源就不会有这种漂移。
+# kmod-fwx 不在枚举里（内核模块的包名与目录名不同，写死在 config 片段里），
+# 但断言必须覆盖它 —— 它恰恰是整层里最关键、最容易编不出来的那个。
+FANCHM_PKGS="kmod-fwx $(enumerate_fanchmwrt_pkgs | tr '\n' ' ')"
 
 # --- iStoreOS 层 ---
 ISTORE_PKGS="luci-app-quickstart quickstart luci-app-store taskd luci-lib-taskd luci-lib-xterm"

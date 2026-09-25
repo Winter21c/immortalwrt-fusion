@@ -1,0 +1,187 @@
+# ===========================================================================
+# 上游跟进检查
+#
+# 解决的问题：ImmortalWrt 是构建时现拉的、iStoreOS 侧走 feed 也自动更新，
+# 但 **FanchmWrt 是 vendored 的 —— 上游有新特性它不会自己跟上来**。
+# 这个工作流每周去看一眼，有更新就开一个 PR 让人 review。
+#
+# ---------------------------------------------------------------------------
+# 只把两件事当成「需要行动」
+# ---------------------------------------------------------------------------
+#
+#   1. vendor/fanchmwrt 与上游有差异  → 开 PR（附差异清单）
+#   2. 内核补丁不再能应用            → 开 Issue（这个会让所有人的构建失败）
+#
+# feed 的 SHA 只写进报告做记录，不算变更 —— 它们本来就是滚动跟随的，
+# 每周报一次「变了」纯属噪音。
+#
+# ---------------------------------------------------------------------------
+# 为什么是开 PR 而不是直接推到 main
+# ---------------------------------------------------------------------------
+#
+# vendor 进来的是第三方代码，里面包含一个**会改动内核**的补丁。自动合并
+# 意味着某天早上所有人的构建突然坏掉，而且没人看过 diff。
+#
+# 开 PR 的好处是：diff 看得见、PR 上会跑四种组合的配置回归检查
+# （check-combos.yml），人只需要判断「这个改动要不要」。
+#
+# ---------------------------------------------------------------------------
+# 另外：真正会让项目腐烂的不是代码，是外部数据
+# ---------------------------------------------------------------------------
+#
+# v2ray-geodata 的规则数据 tag 只保留约三个月，各类 feed 也会变。
+# 那些问题只有真编一次才知道。build-x86_64.yml 末尾有一个注释掉的
+# 每周定时构建，建议一并打开 —— 那个才是「提前发现腐烂」的主力，
+# 这个工作流负责的是「上游有新东西，我们要不要跟」。
+# ===========================================================================
+name: 上游跟进检查
+
+on:
+  schedule:
+    # 每周一 03:00 UTC = 北京时间 11:00。
+    # ⚠️ GitHub 的 cron 一律按 UTC 解释，与仓库时区无关。
+    - cron: '0 3 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write        # 开分支、推 commit
+  pull-requests: write   # 开 PR
+  issues: write          # 内核补丁失效时开 Issue
+
+concurrency:
+  group: upstream-watch
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    name: 检查 FanchmWrt / ImmortalWrt / feed 的更新
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+
+    env:
+      CURL_OPTIONS: --speed-limit 51200 --speed-time 60
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0     # 要建分支、推 commit
+
+      - name: 安装依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential clang flex bison g++ gawk gettext \
+            git libncurses-dev libssl-dev python3-setuptools \
+            rsync swig unzip zlib1g-dev file wget time patch
+
+      - name: 释放磁盘空间
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android \
+            /usr/local/share/boost /opt/ghc /opt/hostedtoolcache/CodeQL \
+            /usr/share/swift /usr/local/.ghcup /opt/az /usr/lib/jvm || true
+          sudo apt-get clean
+          df -h /
+
+      # --deep 要验证内核补丁能否应用，那需要一棵装好 feed 的源码树。
+      # 这一步约十几分钟，是这个工作流里最慢的部分，但它验的正是
+      # 「会让所有人构建失败」的那件事，值得。
+      - name: 准备源码树（供内核补丁验证用）
+        env:
+          SKIP_BUILD: '1'
+        run: ./build.sh
+
+      - name: 检查上游
+        id: check
+        run: |
+          set +e
+          ./scripts/check-upstream.sh --deep --report /tmp/upstream-report.md
+          RC=$?
+          set -e
+          echo "rc=$RC" >> "$GITHUB_OUTPUT"
+          case "$RC" in
+            0)  echo "结论：无变化" ;;
+            10) echo "结论：FanchmWrt 有更新" ;;
+            20) echo "结论：内核补丁打不上了" ;;
+            *)  echo "::error::check-upstream.sh 异常退出（$RC）" ;;
+          esac
+          exit 0
+
+      - name: 写进运行摘要
+        if: always()
+        run: |
+          if [ -f /tmp/upstream-report.md ]; then
+            cat /tmp/upstream-report.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "没有生成报告 —— 检查步骤本身失败了，看它的日志。" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # ---------------------------------------------------------------------
+      # 有更新 → 开 PR
+      # ---------------------------------------------------------------------
+      - name: 把 vendor 更新推成一个 PR
+        if: steps.check.outputs.rc == '10'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          BRANCH="upstream/fanchmwrt-$(date -u +%Y%m%d)"
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git checkout -b "$BRANCH"
+          ./scripts/check-upstream.sh --apply-vendor
+
+          git add -A
+          if git diff --cached --quiet; then
+            echo "没有实际改动，跳过 PR"
+            exit 0
+          fi
+
+          # commit message 与 PR 正文都取自仓库里的模板文件，不在 YAML 里写
+          # 多行长文本 —— 块标量里出现顶格行会把 YAML 结构截断，而且报错
+          # 指向的行号很难和真正的原因对上。
+          {
+            printf '同步 FanchmWrt 上游更新（%s）\n\n' "$(date -u +%Y-%m-%d)"
+            cat .github/upstream-sync-commit.txt
+          } > /tmp/commit-msg.txt
+          git commit -F /tmp/commit-msg.txt
+          git push -u origin "$BRANCH"
+
+          gh pr create \
+            --title "同步 FanchmWrt 上游更新（$(date -u +%Y-%m-%d)）" \
+            --body-file /tmp/upstream-report.md \
+            --base main --head "$BRANCH" \
+            || gh pr edit "$BRANCH" --body-file /tmp/upstream-report.md
+
+      # ---------------------------------------------------------------------
+      # 内核补丁失效 → 开 Issue。这个优先级最高：它会让所有人的构建失败。
+      # ---------------------------------------------------------------------
+      - name: 内核补丁失效时开 Issue
+        if: steps.check.outputs.rc == '20'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          TITLE="内核补丁 950-fwx 不再能应用到 ImmortalWrt 内核"
+
+          # 已经有开着的同类 Issue 就只补一条评论，不要每周开一个新的 ——
+          # 每周多一个重复 Issue 只会让人把通知静音掉。
+          EXISTING=$(gh issue list --state open --search "$TITLE in:title" \
+            --json number --jq '.[0].number // empty')
+
+          # 正文取自仓库里的模板文件；同时把本次运行的报告链接带上，
+          # 因为模板本身不知道是哪一次运行触发的。
+          {
+            cat .github/issue-kernel-patch-failed.md
+            printf '\n---\n\n本次运行：%s/%s/actions/runs/%s\n' \
+              "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID"
+          } > /tmp/issue-body.md
+
+          if [ -n "$EXISTING" ]; then
+            gh issue comment "$EXISTING" --body-file /tmp/issue-body.md
+            echo "已追加到已有 Issue #$EXISTING"
+          else
+            gh issue create --title "$TITLE" --body-file /tmp/issue-body.md --label bug \
+              || gh issue create --title "$TITLE" --body-file /tmp/issue-body.md
+          fi

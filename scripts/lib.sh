@@ -54,6 +54,43 @@ assert_pkg_off() {
 	! grep -q "^CONFIG_PACKAGE_$2=y$" "$1"
 }
 
+# ---------------------------------------------------------------------------
+# load_upstreams
+#
+# 读 upstreams.conf，把里面的上游仓库与 ref 变成环境变量。
+#
+# **只设置尚未设置的变量** —— 这样优先级是：
+#     环境变量（CI 输入 / 命令行） > upstreams.conf > 调用处的兜底
+# 显式指定的永远赢，文件只提供默认值。
+#
+# 用 eval 而不是 `. file` 的原因是：source 会无条件覆盖已设置的变量，
+# 那样环境变量就压不过文件了。
+# ---------------------------------------------------------------------------
+load_upstreams() {
+	_conf="${PROJECT_ROOT:?PROJECT_ROOT 未设置}/upstreams.conf"
+	[ -f "$_conf" ] || die "找不到上游清单：$_conf"
+
+	while IFS= read -r _line || [ -n "$_line" ]; do
+		# 去注释与空行
+		case "$_line" in
+			'' | '#'*) continue ;;
+		esac
+		_k="${_line%%=*}"
+		_v="${_line#*=}"
+		# 变量名只允许字母数字下划线，挡掉一切奇怪的输入
+		case "$_k" in
+			'' | *[!A-Za-z0-9_]*) continue ;;
+		esac
+		eval "_cur=\${$_k:-}"
+		[ -n "$_cur" ] || eval "$_k=\$_v"
+	done < "$_conf"
+
+	# 导出，让子脚本（01-fetch.sh 等）也能读到
+	export IMMORTALWRT_REPO IMMORTALWRT_REF
+	export FANCHMWRT_REPO FANCHMWRT_REF
+	export FANCHMWRT_PACKAGES_REPO FANCHMWRT_PACKAGES_REF
+}
+
 # acquire_lock
 #
 # 独占锁：同一个工作区同时只能有一个构建在跑。

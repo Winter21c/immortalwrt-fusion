@@ -194,6 +194,71 @@ git push origin v25.12.1-fusion.1
 
 ---
 
+## 🔄 上游更新怎么跟
+
+三种上游，「会不会自动跟上」的答案不一样，分开说清楚：
+
+| 上游 | 消费方式 | 上游更新后 | 我们要做什么 |
+|---|---|---|---|
+| **ImmortalWrt** | 构建时现拉 `openwrt-25.12` 分支 | **自动跟上** | 什么都不用做 |
+| **iStoreOS 侧**（quickstart / store / NAS 套件 / argon） | feed，构建时 `feeds update` 拉分支最新 | **已选中包的内容自动跟上** | 通常不用；feed 里新增的包不会自己进来 |
+| **FanchmWrt** | **vendored**（代码在 `vendor/` 里） | **不会自动跟** | 需要一次 review 过的同步 |
+
+> **为什么 FanchmWrt 要 vendor 而不是也走 fetch**：它的 `kmod-fwx` 需要一处
+> **内核改动**（给 `struct nf_conn` 加 `fwx_data` 字段），那个补丁必须和
+> ImmortalWrt 的内核版本一起验证过才能用。直接构建时现拉上游，意味着上游
+> 某天改了内核侧的东西、我们的构建就当场炸，而且没人看过 diff。
+
+### 上游有更新时会发生什么
+
+`.github/workflows/upstream-watch.yml` 每周一自动跑一次，只把**真正可行动**的
+两件事当成变更：
+
+1. **`vendor/fanchmwrt` 与上游不一致** → 自动开一个 PR，把差异清单放进描述里。
+   PR 上会跑四种组合的配置回归检查，你只需要判断「这个改动要不要」。
+2. **内核补丁不再能应用** → 自动开 Issue（已开则追加评论，不会每周刷一个新的）。
+   这个优先级最高 —— 它会让所有人勾 FanchmWrt 的构建失败。
+
+feed 的 SHA 只写进报告做记录，**不算变更** —— 它们本来就是滚动跟随的，
+每周报一次「变了」纯属噪音。
+
+### 想手动看一眼
+
+```sh
+./scripts/check-upstream.sh              # 检查并打印报告
+./scripts/check-upstream.sh --deep       # 额外验证内核补丁仍能应用（慢）
+./scripts/check-upstream.sh --apply-vendor   # 把上游变化写进 vendor/
+```
+
+退出码：`0` 无变化、`10` vendor 有更新、`20` 内核补丁打不上了。
+
+### 想换上游版本
+
+改 `upstreams.conf` 一处即可 —— 那是唯一的来源，构建脚本都读它：
+
+```sh
+IMMORTALWRT_REF=openwrt-25.12     # 换 tag 就能锁死版本，换取可复现
+FANCHMWRT_REF=fanchmwrt-25.12.4   # 上游按 OpenWrt 版本开分支
+```
+
+临时试一个版本不用改文件：`IMMORTALWRT_REF=my-ref ./build.sh`（环境变量优先）。
+
+### 上游新增了应用，会自动跟上吗
+
+**会。** FanchmWrt 层的包清单不是写死的，而是构建时从 `vendor/` 枚举出来的
+（`scripts/04-config.sh` 的 `enumerate_fanchmwrt_pkgs`）。上游新增一个
+`luci-app-fwx-*`，同步进 `vendor/` 之后下一次构建就会自动编进去，不需要改
+任何配置文件。
+
+这一点很重要：写死的清单会**静默地**漏掉新应用 —— 构建成功、断言全过、
+固件里却没有新功能，没有任何提示。
+
+之所以这样做是安全的：`vendor/` 的内容不会自己变，上游更新走的是
+`upstream-watch` 开的 PR，人工看过 diff 才合并。所以「自动跟上上游」不会
+退化成「自动引入没看过的东西」。
+
+---
+
 ## 🛠️ 自己编译
 
 需要 Linux（推荐 Ubuntu 22.04+）、约 30GB 磁盘、能访问 GitHub 与 Go 模块代理。
@@ -300,7 +365,7 @@ immortalwrt-fusion/
 好处是构建不依赖上游分支的稳定性（上游 force-push 或删分支都不会影响这里），
 而且内核模块万一需要针对 ImmortalWrt 的内核适配，可以直接在这里改。
 代价是上游更新不会自动流进来 —— 要同步的话用
-`scripts/sync-vendor.sh`（见下）。
+`scripts/check-upstream.sh`（见下面「上游更新怎么跟」）。
 
 ---
 

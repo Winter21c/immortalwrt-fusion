@@ -11,7 +11,9 @@
 set -eu
 . "$(dirname "$0")/lib.sh"
 
-REF="${IMMORTALWRT_REF:-openwrt-25.12}"
+# 直接跑本脚本时也要能拿到 ref（build.sh 会先 export，但单跑不会）
+load_upstreams
+REF="$IMMORTALWRT_REF"
 SRC="$PROJECT_ROOT/openwrt"
 STAMP="$SRC/.immortalwrt-ref"
 

@@ -1,0 +1,19 @@
+由 .github/workflows/upstream-watch.yml 自动生成。
+
+vendor/fanchmwrt 与上游不再一致，这里把上游内容同步进来。
+完整的差异清单见 PR 描述。
+
+⚠️ 合并前请确认三件事：
+
+1. package/fcm/fwx 与 fwxd 的改动是否影响内核模块。
+   它依赖内核里的 fwx_data 字段，见
+   vendor/fanchmwrt/kernel-patches/950-fwx-nf-conn-struct-user-hook.patch
+
+2. 上游若动了内核补丁，要确认 ImmortalWrt 的 6.12 内核仍能应用。
+   跑 ./scripts/check-upstream.sh --deep 可以验证。
+
+3. 四种组合的配置回归检查（.github/workflows/check-combos.yml）是否通过。
+   它会在本 PR 上自动跑。
+
+合并之后不需要做别的 —— 包清单是从 vendor/ 枚举出来的，
+上游新增的 luci-app-fwx-* 会自动进入下一次构建。
