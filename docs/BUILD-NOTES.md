@@ -275,17 +275,19 @@ fanchmwrt/target/linux/generic/hack-6.12/950-fwx-nf-conn-struct-user-hook.patch
 **这条是本项目对底座的唯一实质性改动。** 其余全是叠加（加包、加主题、
 加 feed）。所以 README 里必须显著声明：不想动内核就不要勾 FanchmWrt。
 
-#### 附带的一个坑：切换勾选后内核不会自动重来
+#### 附带加的一道保险
 
-OpenWrt 的 kernel prepare 只看 `$(LINUX_DIR)/.prepared` 这个戳，
-**不会因为补丁目录里多了或少了一个文件就重来**。
+先说清楚：**OpenWrt 本来就会处理这件事。** `include/kernel-build.mk` 的
+`KERNEL_FILE_DEPENDS` 里包含 `GENERIC_HACK_DIR`，也就是整个补丁目录都是
+内核 prepare 的依赖 —— 目录里增删文件会改变目录的 mtime，从而自动触发重新
+prepare。（这一条是核对 makefile 确认的，不是推测。）
 
-后果很隐蔽：在同一个工作区里从「勾 FanchmWrt」切到「不勾」，内核里仍然
-留着 `fwx_data`；反过来切换则会缺字段、编译失败，而报错指向 fwx 源码。
+之所以还是加了一道显式的保险：这个失败模式太难查。一旦内核与勾选不符，
+现象是 fwx 编不过、或者运行时起不来，而报错全部指向 fwx 自己，指不到内核。
 
-修法是给补丁状态留一个指纹（`.generated/kernel-fwx-patch`），
-变了就 `make target/linux/clean`。代价是内核重编一次（十几分钟），
-换一个确定性。
+做法是给补丁状态留一个指纹（`.generated/kernel-fwx-patch`），变了就
+`make target/linux/clean`。代价是内核重编一次（十几分钟），换一个
+「所见即所得」的确定性。
 
 ### 4.13 构建独占锁：两个构建不能共用一个工作区
 

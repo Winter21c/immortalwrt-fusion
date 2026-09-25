@@ -125,19 +125,23 @@ fi
 cd "$PROJECT_ROOT/openwrt"
 
 # ---------------------------------------------------------------------------
-# 内核补丁状态变化时，强制重新 prepare 内核
+# 内核补丁状态变化时，强制重新 prepare 内核（保险，不是唯一防线）
 #
 # 勾选 FanchmWrt 会往 target/linux/generic/hack-6.12/ 里放一个内核补丁
-# （给 struct nf_conn 加 fwx_data 字段，见 scripts/03-overlay.sh）。问题在于
-# OpenWrt 的 kernel prepare 只看 `$(LINUX_DIR)/.prepared` 这个戳，
-# **不会因为补丁目录里多了或少了一个文件就重来**。
+# （给 struct nf_conn 加 fwx_data 字段，见 scripts/03-overlay.sh）。
 #
-# 后果很隐蔽：在同一个工作区里从「勾 FanchmWrt」切到「不勾」，内核里仍然
-# 留着 fwx_data；反过来切换则会缺字段、编译在 fwx_main.c 上报
-# "no member named 'fwx_data'"，而根因在内核侧，报错完全指不到。
+# 先说清楚：**OpenWrt 本来就会处理这件事。**
+# include/kernel-build.mk 的 KERNEL_FILE_DEPENDS 里包含 GENERIC_HACK_DIR，
+# 也就是整个补丁目录都是内核 prepare 的依赖 —— 目录里增删文件会改变目录
+# 的 mtime，从而自动触发重新 prepare。这一条是核对过 makefile 确认的，
+# 不是推测。
 #
-# 所以这里给补丁状态留一个指纹，变了就清掉内核构建目录。
-# 代价是内核重编一次（十几分钟），换一个确定性 —— 值得。
+# 那为什么还要再加一道？因为这个失败模式太难查：一旦内核与勾选不符，
+# 现象是 fwx 编不过（"no member named 'fwx_data'"）或者运行时起不来，
+# 而报错全部指向 fwx 自己，指不到内核侧。花十几分钟重编一次内核，
+# 换一个「所见即所得」的确定性，是划算的。
+#
+# 指纹不存在时（首次构建）不清理 —— 那时候本来就要从头编。
 # ---------------------------------------------------------------------------
 mkdir -p "$PROJECT_ROOT/.generated"
 KERNEL_STAMP="$PROJECT_ROOT/.generated/kernel-fwx-patch"
