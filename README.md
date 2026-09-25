@@ -397,6 +397,8 @@ immortalwrt-fusion/
 | 编译后固件里真实的包列表 | ✅ 对照 `*.manifest` 核对：513 个包，该有的都在、不要的都不在 |
 | 镜像数量与 sha256 校验和 | ✅ 4 个镜像，校验和全部通过 |
 | **DPI 内核模块编到 ImmortalWrt 内核上** | ✅ 固件里是 `kmod-fwx 6.12.108-r1`，`.ko` 落在 `lib/modules/6.12.108/fwx.ko` |
+| **QEMU/KVM 真启动** | ✅ 引导正常，`fwx` 模块加载成功（`fwx: init ok`），LuCI 返回 HTTP 200 |
+| 启动后的实际状态 | ✅ fwxd / uhttpd 运行中，主题 = fanchmwrt，LAN = 192.168.1.1/24 且路由正确，Docker 29.6.1 存储驱动 overlayfs |
 
 完整编译的实测数据（版本、大小、耗时）见
 [docs/BUILD-NOTES.md](docs/BUILD-NOTES.md) 第 5 节。
@@ -407,8 +409,10 @@ immortalwrt-fusion/
 
 ### 没法在这里验证的
 
-**这份固件从来没有启动过。** 编译通过 ≠ 能启动 —— 尤其是勾了 FanchmWrt
-的时候，那个版本改过内核。以下全部需要你刷上去自己确认：
+**已在 QEMU/KVM 里真实启动验证过**（引导、fwx 模块加载、主题、LAN 路由、
+LuCI 访问、Docker 全部正常，见 docs/BUILD-NOTES.md 5.5）。
+
+但 QEMU 不是真机，以下仍需你自己确认：
 
 - 能否正常启动、LuCI 能否打开
 - FanchmWrt 主题与仪表盘是否生效、**高级 / 普通模式**能否切换
@@ -433,10 +437,20 @@ docker info 2>/dev/null | grep -i "storage driver"
 # 3. 这次固件是用什么参数编的
 cat /etc/build-options
 
-# 4. 管理地址与主题
+# 4. 管理地址、掩码与路由
+#    ⚠️ 重点看掩码：应该是 /24，不是 /32。
+#    如果是 /32，说明管理地址丢了前缀长度，路由器连不上局域网设备。
 uci get network.lan.ipaddr
-uci get luci.main.mediaurlbase
+ip -4 addr show br-lan | grep inet
+ip route | grep br-lan            # 应有 192.168.1.0/24 dev br-lan
+
+# 5. 主题
+uci get luci.main.mediaurlbase    # 勾了 FanchmWrt 应是 /luci-static/fanchmwrt
 ```
+
+> 第 4 条那个 `/32` 是真踩过的坑（见 docs/BUILD-NOTES.md 4.18）：
+> 编译、断言、产物核验全过，开机却是 /32，路由器连不上局域网。
+> 已经修了，但列在这里是因为「编译通过」和「能正常用」之间确实还隔着一步。
 
 其他未验证项：
 

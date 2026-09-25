@@ -411,6 +411,47 @@ export PROJECT_ROOT
 两个以上才提示。方向刻意做成单向的 —— 反过来（标志为开、产物里却没有）
 仍然是真正的失败，照常报错，不能因为怀疑清单过期就放过真问题。
 
+### 4.18 管理地址丢了前缀长度，LAN 变成 /32（只有真启动才发现）
+
+**现象**：在 QEMU 里启动固件后，`ip -4 addr show br-lan` 出来的是
+
+```
+inet 192.168.1.1/32 brd 255.255.255.255 scope global br-lan
+```
+
+而且 `ip route` 里**只有 docker0 那一条**，没有 `192.168.1.0/24`。
+
+**后果**：路由器连不上局域网里的任何设备，LuCI 打不开 —— 而配置里明明写着
+`192.168.1.1`，界面上看不出任何异常。
+
+**根因**：OpenWrt 的 `config_generate` 生成 lan 时写的是
+
+```
+add_list network.lan.ipaddr='192.168.1.1/24'
+```
+
+—— **前缀长度写在 `ipaddr` 里，没有单独的 `netmask` 选项**
+（`package/base-files/files/bin/config_generate` 第 170-177 行）。
+
+而我们的 `25_lan_ip` uci-defaults 为了改地址必须 `delete` 再 `add_list`
+（config_generate 把它生成成了 list，不 delete 会同时留下两个地址）。
+这时只写 `192.168.1.1`，前缀就丢了。
+
+**修法**：`scripts/04-config.sh` 里统一补全 —— 没写前缀就补 `/24`
+（OpenWrt 的默认值），显式写了就原样尊重。
+
+**这个 bug 的价值在于它躲过了前面所有关卡**：
+
+| 关卡 | 为什么没抓到 |
+|---|---|
+| 编译 | 语法与依赖都没问题 |
+| `.config` 双向断言 | 断言的是「装没装这个包」，不检查包内配置文件的语义 |
+| `09-verify.sh` | 对照的是包清单与镜像校验和 |
+| 离线翻镜像 | 打开 `25_lan_ip` 看，脚本本身完全正常 —— 缺的是对它**运行结果**的理解 |
+
+**只有真启动一次才会暴露。** 这也是为什么 README 里那段「刷机后先确认这几件事」
+不是客套话 —— 编译通过、断言全过、产物核验通过，仍然可能开机就连不上。
+
 ### 4.15 第三方 feed 剪枝：让位给底座
 
 **现象**：`luci-app-cpufreq` 在三个地方同时存在 ——
@@ -550,107 +591,38 @@ luci-theme-argon   ✅ 不在（勾了 FanchmWrt，主题让位）
 
 `check-all-combos.sh` 也在本地与 CI 上各跑通过一次（本地约 10 分钟，CI 上 6m22s）。
 
-### 5.5 QEMU 实机验证
+### 5.5 QEMU 实机验证（做了）
 
-**没有做。** 这份固件没有在 QEMU 或真机上启动过，以下都未经验证：
+第一次真启动。用的是编出来的 `squashfs-combined` 镜像，QEMU/KVM + virtio
+磁盘与网卡，串口控制台驱动。
 
-- 能否正常启动、LuCI 能否打开
-- FanchmWrt 主题与仪表盘是否真的生效、高级/普通模式能否切换
-- QuickStart 首页是否真的是首页
-- fwx 内核模块能否加载（`dmesg | grep fwx`、`lsmod`）
-- Docker 能否起来、存储驱动是否为 overlay2
-- mosdns / OpenClash 的服务状态
+**结论：启动正常，界面能打开，而且抓到一个只有真启动才能发现的 bug（第 4.18 节）。**
 
-**编译通过 ≠ 能启动。** 尤其这一版改过内核，`kmod-fwx` 能否加载是需要
-实测确认的第一件事。刷机前请先备份，并准备好回滚方案。
+| 验证项 | 结果 |
+|---|---|
+| 引导 | ✅ GRUB → Linux **6.12.108**，KVM 加速 |
+| 根文件系统 | ✅ `/dev/vda2` squashfs(ro) on `/rom` + f2fs on `/overlay` + overlayfs on `/` |
+| **fwx 内核模块** | ✅ `dmesg`: `fwx: Driver ver. 1.0.4 - Copyright(c) 2026, fanchmwrt`、`fwx: init ok`；`lsmod`: fwx 110592 |
+| fwxd 守护进程 | ✅ `/usr/bin/fwxd` 运行中 |
+| uhttpd | ✅ 运行中 |
+| 主题 | ✅ `luci.main.mediaurlbase = /luci-static/fanchmwrt`；`/www/luci-static/` 里有 `fanchmwrt`，**没有 argon** |
+| 管理地址 | ✅ `192.168.1.1/24`，`br-lan` 上掩码正确 |
+| 局域网路由 | ✅ `192.168.1.0/24 dev br-lan proto kernel scope link src 192.168.1.1` |
+| **LuCI 可访问** | ✅ 主机侧 `curl http://127.0.0.1:8080/` 返回 **HTTP 200** |
+| Docker | ✅ `running`，`Server Version: 29.6.1`，`Storage Driver: overlayfs`，`Containers: 0` |
+| 磁盘占用 | ✅ overlayfs 904.8M，已用 68.8M（8%） |
+| `/etc/build-options` | ✅ 在固件里，参数与构建时一致 |
+| FanchmWrt 模式默认值 | ✅ `100_fwx` 设了 `fwx.global.theme_mode=\'1\'` |
 
----
+**第一次启动（修复前）是失败的**：`br-lan` 拿到 `192.168.1.1/32`，`ip route`
+里只有 docker0 一条 —— 路由器连不上局域网，LuCI 打不开。修完前缀长度之后
+重编、重启，掩码与路由都正确，LuCI 返回 200。详见第 4.18 节。
 
-## 6. 还没验证的
+**仍然没有验证的**（需要真机 + 真实环境）：
 
-诚实列出来，别让使用者以为都验过了：
-
-- **四种组合里只实编了哪些**：见 5.2。另外三种组合的 `.config` 断言是过的，
-  但没有真编过 —— 差别主要在包集合，编不过的风险低，但不是零。
-- **fwx 的应用识别效果**：需要真实流量，空跑看不出来。
-- **iStore 能否拉到应用列表**：取决于外网连通性。
-- **OpenClash**：内核要联网下载，分流效果取决于订阅规则。
-- **升级路径**：从 FanchmWrt 或 iStoreOS 直接升到本固件、以及反向回去，
-  都没有验证过。跨发行版升级请当作全新刷机。
-
----
-
-## 7. 上游跟进：三种消费方式，三种答案
-
-这一节解释「上游有新特性，我们能不能跟上」这个问题为什么不能一句话回答。
-
-### 7.1 三种消费方式
-
-| 上游 | 方式 | 上游更新后 |
-|---|---|---|
-| ImmortalWrt | `fetch` —— 构建时现拉分支 tarball | **自动跟上**，无需任何操作 |
-| iStoreOS 侧 feed | `feed` —— 构建时 `feeds update` 拉分支最新 | **已选中包的内容自动跟上**；feed 里新增的包不会自己进来 |
-| FanchmWrt | `vendor` —— 代码在 `vendor/` 里 | **不会自动跟**，需要一次 review 过的同步 |
-
-这三种的 ref 分散在两个地方，各管各的：
-
-- `upstreams.conf` —— ImmortalWrt 的 ref、FanchmWrt 的两个 ref（构建脚本读它）
-- `feeds.conf.append` —— 所有 feed 的地址与 ref（构建时真正被读取的地方）
-
-**feed 的 ref 没有在 `upstreams.conf` 里重复一份**：两处写同一个值，迟早会对不上。
-
-### 7.2 为什么 FanchmWrt 必须 vendor
-
-因为它的 `kmod-fwx` 依赖一处**内核改动**（第 4.12 节）。那个补丁必须和
-ImmortalWrt 的内核版本一起验证过才能用。
-
-如果改成构建时现拉上游：
-
-- 上游某天调整了内核侧的东西，我们的构建当场炸，而没人看过 diff；
-- 上游 force-push 或删分支，构建直接失败；
-- 内核模块需要为 ImmortalWrt 适配时，没有可改的地方。
-
-代价是上游更新不会自动流进来 —— 这正是 `upstream-watch.yml` 要解决的问题。
-
-### 7.3 上游更新走 PR，不直接推 main
-
-`vendor` 进来的是第三方代码，里面包含一个**会改动内核**的补丁。自动合并
-意味着某天早上所有人的构建突然坏掉，而且没人看过 diff。
-
-所以流程是：每周检查 → 有差异就开 PR（附差异清单）→ PR 上跑四种组合的
-配置回归检查 → 人判断要不要。
-
-### 7.4 只把可行动的事当成变更
-
-这是这个工作流设计上最关键的一条：
-
-- `vendor/fanchmwrt` 与上游不一致 → **变更**（开 PR）
-- 内核补丁不再能应用 → **变更**（开 Issue）
-- feed 的 SHA 动了 → **不是变更**，只写进报告做记录
-
-理由：feed 本来就是滚动跟随的，每周报一次「变了」是噪音。而**假阳性比漏报
-更消耗注意力** —— 它会让人开始习惯性忽略这个工作流，那样真出问题时也没人看。
-
-同一条理由也适用于 `VENDOR_SKIP` 那张排除表（`fullconenat` 等我们故意不收的
-东西）。最初没有这张表时，每次检查都报「上游多了 fullconenat」——
-一个永远需要人工判断、但答案永远是「不用管」的提示。
-
-### 7.5 上游新增应用会自动跟上
-
-FanchmWrt 层的包清单**不是写死的**，而是构建时从 `vendor/` 枚举出来的
-（`scripts/04-config.sh` 的 `enumerate_fanchmwrt_pkgs`）。
-
-写死清单的问题不是「麻烦」，而是**静默漏掉**：上游新增一个
-`luci-app-fwx-*`，构建成功、断言全过、固件里却没有新功能，没有任何信号。
-
-枚举的实现里有一个真踩过的坑：**必须 strip `\r`**。上游有 7 个
-`luci-app-fwx-*` 的 Makefile 是 CRLF 行尾，`PKG_NAME` 取出来会带一个回车，
-写进 `.config` 就成了
-
-```
-CONFIG_PACKAGE_luci-app-fwx-app-center\r=y
-```
-
-kconfig 认不出这个符号，**静默丢弃** —— 17 个应用丢了 7 个。只有断言把
-「该有却没有」报出来才发现。现在还有一道格式哨兵：包名里出现非
-`[A-Za-z0-9._+-]` 的字符就直接报错中止。
+- 真实网卡（QEMU 里是 virtio，真机上是各种物理网卡驱动）
+- **fwx 的应用识别效果** —— 需要真实流量，空跑看不出来
+- WAN 口上网、PPPoE、IPv6
+- iStore 能否拉到应用列表（取决于外网连通性）
+- OpenClash 内核下载与分流（取决于订阅规则）
+- 从 FanchmWrt / iStoreOS 升级过来的路径
