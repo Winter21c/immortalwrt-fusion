@@ -134,7 +134,7 @@ uci-defaults 去设 `luci.main.mediaurlbase`；argon 那边也有类似的脚本
 `luci-app-mosdns`，而 ImmortalWrt 的 packages 源已经有一个 `net/mosdns`。
 同名包只允许存在一个。
 
-**修法**：`scripts/02-feeds.sh` 在 `feeds update` 之后删掉 feed 里那份
+**修法**：当时是在 `scripts/02-feeds.sh` 里点名删掉 feed 里那份
 `mosdns/`，二进制用 ImmortalWrt 自带的（5.3.3，跟着底座走），
 界面用 sbwml 的（ImmortalWrt 没有 mosdns 的 LuCI 应用）。
 
@@ -193,7 +193,7 @@ uci-defaults 去设 `luci.main.mediaurlbase`；argon 那边也有类似的脚本
 **教训**：这里差点犯的错是「因为那边这么做，所以这边也这么做」。
 真正该问的问题是「底座自己怎么做的，够不够用」。
 
-### 4.11 补丁的 `-d` 目录层级：`-p1` 之后还剩什么
+### 4.10 补丁的 `-d` 目录层级：`-p1` 之后还剩什么
 
 **现象**：`0002-quickstart-menu-order.patch` 报「既不匹配正向也不匹配反向」，
 看起来像上游改了文件，实际文件内容与补丁上下文**一字不差**。
@@ -208,7 +208,7 @@ uci-defaults 去设 `luci.main.mediaurlbase`；argon 那边也有类似的脚本
 分不清是「层级错」还是「内容变了」。最快的区分方式是直接看目标文件在不在
 预期位置，再单独 `patch --dry-run -d <目录>` 试一次。
 
-### 4.12 会在上游改文件时失效的补丁，等于给未来埋雷
+### 4.11 会在上游改文件时失效的补丁，等于给未来埋雷
 
 **现象**：`0003-v2ray-geodata-rolling-releases.patch`（从现有项目继承）
 打不上 —— ImmortalWrt 更新了 pin 的版本号和 HASH，补丁上下文对不上。
@@ -234,9 +234,72 @@ uci-defaults 去设 `luci.main.mediaurlbase`；argon 那边也有类似的脚本
 - `HASH:=skip` 意味着这三个数据文件不再校验哈希（内容随上游滚动）。
   它们只是 DNS 分流规则数据，不参与编译，也不影响其它包。
 
-### 4.13 `patch` 报错信息为什么容易误导
+### 4.12 fwx 需要一处内核改动：`struct nf_conn` 加字段
 
-上面 4.11 和 4.12 都是 `patch` 失败，而报错文本一模一样。三次踩坑分别来自
+**现象**：`make` 编到 `package/fcm/fwx` 时失败：
+
+```
+error: 'struct nf_conn' has no member named 'fwx_data'
+```
+
+**排查**：报错指向 `fwx_main.c` 的几十处 `ct->fwx_data`，但 `struct nf_conn`
+是**内核**里的连接跟踪结构体，不在 fwx 的源码里。说明 FanchmWrt 改过内核。
+
+在 fanchmwrt 树里找到了那处改动：
+
+```
+fanchmwrt/target/linux/generic/hack-6.12/950-fwx-nf-conn-struct-user-hook.patch
+```
+
+对比整个 `hack-6.12` 目录，这是 fanchmwrt **唯一**区别于上游的内核补丁。
+它改 4 个文件：
+
+| 文件 | 改什么 |
+|---|---|
+| `include/net/netfilter/nf_conntrack.h` | 定义 `struct nf_fwx_data`，并作为成员加进 `struct nf_conn` |
+| `include/net/netfilter/nf_fwx_user.h` | 新文件，给内核侧用的 ops 结构 |
+| `net/netfilter/nf_conntrack_core.c` | conntrack 初始化时把字段清零 |
+| `net/netfilter/nf_conntrack_standalone.c` | /proc 输出里带上 fwx 信息 |
+
+**修法**：把这个补丁 vendor 进
+`vendor/fanchmwrt/kernel-patches/`，在 `scripts/03-overlay.sh` 里
+**勾选 FanchmWrt 时装上、不勾时卸下**。
+
+实测它能干净地落到 ImmortalWrt 的 6.12.108 上：4 个文件、10 个 hunk，
+其中两个 hunk 偏移 43 行，`patch` 自动处理，无失败。
+
+编号选 950 是因为 ImmortalWrt 的 `hack-6.12/` 里 950 是空的，且上游自己也把
+它编号在系列末尾。放在 `hack-` 而不是 `x86/patches-` 下，是因为
+`hack-*` 对所有目标生效 —— 虽然本项目只出 x86，但与上游的分类保持一致。
+
+**这条是本项目对底座的唯一实质性改动。** 其余全是叠加（加包、加主题、
+加 feed）。所以 README 里必须显著声明：不想动内核就不要勾 FanchmWrt。
+
+#### 附带的一个坑：切换勾选后内核不会自动重来
+
+OpenWrt 的 kernel prepare 只看 `$(LINUX_DIR)/.prepared` 这个戳，
+**不会因为补丁目录里多了或少了一个文件就重来**。
+
+后果很隐蔽：在同一个工作区里从「勾 FanchmWrt」切到「不勾」，内核里仍然
+留着 `fwx_data`；反过来切换则会缺字段、编译失败，而报错指向 fwx 源码。
+
+修法是给补丁状态留一个指纹（`.generated/kernel-fwx-patch`），
+变了就 `make target/linux/clean`。代价是内核重编一次（十几分钟），
+换一个确定性。
+
+### 4.13 构建独占锁：两个构建不能共用一个工作区
+
+不是「踩坑」，是预判。两个 `build.sh` 共用一个 `openwrt/` 树时，
+`.config`、`package/`、`tmp/`、`dl/` 全是共享的，交叉写入产出的错误极难解释 ——
+典型现象是「参数明明选了不含 Docker，编出来的固件里却有 Docker」，
+因为另一个进程把 `tmp/` 里的元数据换了。
+
+用 `mkdir` 实现（POSIX 上原子），锁目录里留 pid，被占用时报错会指名占锁进程。
+已单独验证：获取成功、退出自动释放、被占用时明确失败。
+
+### 4.14 `patch` 报错信息为什么容易误导
+
+上面 4.10 和 4.11 都是 `patch` 失败，而报错文本一模一样。三次踩坑分别来自
 「环境变量被劫持」「目录层级给错」「上游真的改了文件」。
 
 所以 `scripts/03-overlay.sh` 里 `apply_patch` 的报错文案特意写全了可能的
@@ -246,7 +309,7 @@ uci-defaults 去设 `luci.main.mediaurlbase`；argon 那边也有类似的脚本
 2. 单独 `patch --dry-run` 一次，看是 hunk 失败还是文件找不到；
 3. 目标文件内容与补丁上下文比一比，确认是不是上游真的改了。
 
-### 4.10 第三方 feed 剪枝：让位给底座
+### 4.15 第三方 feed 剪枝：让位给底座
 
 **现象**：`luci-app-cpufreq` 在三个地方同时存在 ——
 `feeds/luci/applications/`（ImmortalWrt 自带）、`package/emortal/cpufreq`
@@ -274,15 +337,37 @@ uci-defaults 去设 `luci.main.mediaurlbase`；argon 那边也有类似的脚本
 
 > 这一节的内容必须来自真实运行，不许写「应该没问题」。
 
-### 5.1 准备阶段（`SKIP_BUILD=1 ./build.sh`）
+### 5.1 四种组合的配置断言
+
+命令：`./scripts/check-all-combos.sh`（等价于四次 `SKIP_BUILD=1 ./build.sh`）。
+**本地与 GitHub Actions 上各跑过一次，结果一致。**
+
+| 组合 | 必须在位 | 确认排除 | 主题 | 本地 | CI |
+|---|---:|---:|---|---|---|
+| ① FanchmWrt + iStoreOS + Docker | 56 | 7 | FanchmWrt | ✅ | ✅ |
+| ② 只要 FanchmWrt | 42 | 23 | FanchmWrt | ✅ | ✅ |
+| ③ 只要 iStoreOS | 36 | 26 | Argon | ✅ | ✅ |
+| ④ 都不勾（纯底座） | 21 | 42 | 不锁（ImmortalWrt 默认） | ✅ | ✅ |
+
+其他实测到的点：
 
 | 项目 | 结果 |
 |---|---|
-| 四组合一（FanchmWrt + iStoreOS + Docker） | 见下 |
-| 拉取 ImmortalWrt | 12.4MB tarball |
-| feed 数量 | 10 个 |
+| 拉取 ImmortalWrt | 12.4MB tarball，解开后约 1.5GB |
+| feed 数量 | 10 个（底座 5 + 追加 5） |
+| 第三方 feed 剪枝 | 剪掉 `mosdns`（撞底座 net/mosdns）与 `luci-app-cpufreq`（撞三处）；全新克隆路径同样生效 |
+| vendored 包重名拦截 | 拦下 `fullconenat` / `fullconenat-nft` —— 与 ImmortalWrt 树内同名，且 `fullconenat-nft` 逐字节相同 |
+| `v2ray-geodata` 滚动地址重写 | 3 个数据源全部改写并逐项校验通过 |
+| QuickStart 菜单序号 | 同时勾两个特性时压到 2；只勾 iStoreOS 时保持上游的 1 |
+| 配置回归检查耗时 | 约 10 分钟（含一次完整 feeds update + 四次 defconfig），CI 实测 |
 
-（待填：四组合各自的断言结果）
+**断言抓到的真实错误**（如果只断言「该有的在」，这两个都会漏过去）：
+
+1. `v2ray-geodata` 写成了包名 —— 它其实是**源包名**，实际产物是
+   `v2ray-geoip` / `v2ray-geosite`。断言报「该有却没有」。
+2. `kmod-nft-fullcone` 与 `luci-compat` 被误当成 FanchmWrt 层的东西 ——
+   实际上前者是 `firewall4` 的依赖、后者是底座层几个 LuCI 应用的依赖，
+   任何组合下都在。断言报「不该有却有」。
 
 ### 5.2 完整编译
 

@@ -63,8 +63,17 @@ sudo dd if=openwrt-x86-64-generic-squashfs-combined-efi.img of=/dev/sdX bs=4M st
 ### @FANCHM@ FanchmWrt 特性
 
 fwx 应用识别引擎（内核态 DPI）、流量统计、行为管理、MAC 过滤、
-上网记录、fullcone NAT，以及 **FanchmWrt 主题**（含仪表盘与
-**高级 / 普通模式**切换）。共 17 个 `luci-app-fwx-*` 应用。
+上网记录，以及 **FanchmWrt 主题**（含仪表盘与**高级 / 普通模式**切换）。
+共 17 个 `luci-app-fwx-*` 应用。
+
+> ⚠️ **这一版改动过内核。** fwx 的内核模块要读写连接跟踪结构体
+> `struct nf_conn` 里一个自定义字段 `fwx_data`，那是 FanchmWrt 自己给内核加的。
+> 所以构建时打了一个内核补丁（`950-fwx-nf-conn-struct-user-hook.patch`，
+> 取自 fanchmwrt 的 `target/linux/generic/hack-6.12/`）。
+> 不想动内核就重新构建一次、把 FanchmWrt 那个勾去掉。
+
+> fullcone NAT 由底座提供（ImmortalWrt 树内已有，且 `firewall4` 依赖它），
+> 不在这一层里。
 
 ### @ISTORE@ iStoreOS 特性
 

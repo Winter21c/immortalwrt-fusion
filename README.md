@@ -117,13 +117,31 @@ git push origin v25.12.1-fusion.1
 |---|---|
 | **fwx 应用识别** | 内核态 netfilter 模块，按应用/协议特征识别流量（DPI） |
 | **fwxd** | 用户态守护进程，管特征库、会话与统计 |
-| **fullcone NAT** | 完整锥形 NAT，改善 P2P / 游戏 / 联机（nftables 版） |
 | **17 个 `luci-app-fwx-*`** | 应用过滤、行为管理、MAC 黑白名单、上网记录、流量统计、在线用户、无线管理、应用中心等 |
 | **`luci-theme-fanchmwrt`** | FanchmWrt 主题：仪表盘 + 菜单 + **高级 / 普通模式**开关 |
+
+> ⚠️ **勾选这一层会改动内核**，这一点必须说清楚。
+>
+> fwx 不是普通的包：它的内核模块直接读写连接跟踪结构体 `struct nf_conn` 里
+> 一个叫 `fwx_data` 的自定义字段，而这个字段是 FanchmWrt 自己给内核加的，
+> ImmortalWrt 的内核里没有。所以本仓库带了一个内核补丁
+> （`vendor/fanchmwrt/kernel-patches/950-fwx-nf-conn-struct-user-hook.patch`，
+> 取自 fanchmwrt 的 `target/linux/generic/hack-6.12/`），
+> **只在勾选 FanchmWrt 时装上，不勾时卸下**。
+>
+> 这是 fwx 的硬性前提，绕不过去 —— 尝试过直接编，失败信息是
+> `error: 'struct nf_conn' has no member named 'fwx_data'`，
+> 报错指向 fwx 的源码，根因却在内核侧。
+>
+> 换句话说：**这是本项目里唯一一处对底座的实质性改动**，其余全部是叠加。
+> 不想动内核就不要勾这一层。
 
 > **「高级 / 普通模式」不是独立功能，它实现在 FanchmWrt 主题的菜单脚本里。**
 > 普通模式只显示 fwx 自己的菜单，高级模式才露出全部。所以「勾 FanchmWrt 就用
 > FanchmWrt 主题」不是巧合，而是这两件事本来就是一件事。
+
+> **fullcone NAT 不在这一层里。** ImmortalWrt 树内已经有 `fullconenat-nft`，
+> 而且 `firewall4` 的依赖里就挂着它 —— 任何组合下都在，不需要我们重复带一份。
 
 ### iStoreOS 层（勾了才有）
 

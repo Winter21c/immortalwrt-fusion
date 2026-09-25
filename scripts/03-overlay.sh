@@ -95,9 +95,35 @@ if [ "$WITH_FANCHMWRT" = "1" ]; then
 	rm -rf "$SRC/package/fanchmwrt-packages/README.md" \
 	       "$SRC/package/fanchmwrt-packages/LICENSE"
 	say "已铺入 FanchmWrt 层：$(ls -1 "$SRC/package/fanchmwrt-packages" | wc -l) 个 LuCI 应用 + $(ls -1 "$SRC/package/fcm" | wc -l) 个基础包"
+
+	# -------------------------------------------------------------------
+	# 内核补丁：这一层**会改动内核**，必须说清楚
+	# -------------------------------------------------------------------
+	# fwx 不是普通的包。它的内核模块直接读写 `struct nf_conn`（连接跟踪
+	# 结构体）里的一个自定义字段 fwx_data —— 这个字段是 FanchmWrt 自己给
+	# 内核加的，ImmortalWrt 的内核里没有。不加这个补丁，编译会在
+	#     error: 'struct nf_conn' has no member named 'fwx_data'
+	# 上失败，报错指向 fwx_main.c，看不出根因在内核侧。
+	#
+	# 补丁取自 fanchmwrt 的 target/linux/generic/hack-6.12/，是它对内核的
+	# **唯一**改动（对比过整个 hack-6.12 目录，只有这一个文件是它独有的）。
+	# 实测能干净地落到 ImmortalWrt 的 6.12.108 上：4 个文件、10 个 hunk，
+	# 其中两个 hunk 偏移 43 行，patch 自动处理。
+	#
+	# 放在 hack-6.12/ 而不是 x86 专属目录：hack-* 是对所有目标生效的，
+	# 与上游把 950 编在系列末尾的做法一致。编号 950 在 ImmortalWrt 里是空的。
+	FWX_KERNEL_PATCH="950-fwx-nf-conn-struct-user-hook.patch"
+	KERNEL_PATCH_DIR="$SRC/target/linux/generic/hack-6.12"
+	[ -d "$KERNEL_PATCH_DIR" ] || die "找不到内核补丁目录 $KERNEL_PATCH_DIR —— ImmortalWrt 的内核目录结构变了，需要人工核对。"
+	cp "$PROJECT_ROOT/vendor/fanchmwrt/kernel-patches/$FWX_KERNEL_PATCH" "$KERNEL_PATCH_DIR/"
+	say "已装内核补丁 $FWX_KERNEL_PATCH（给 struct nf_conn 加 fwx_data 字段）"
+	say "  ⚠️ 勾选 FanchmWrt = 内核被改动，这是 fwx 的硬性前提，无法绕过"
 else
 	rm -rf "$SRC/package/fcm" "$SRC/package/fanchmwrt-packages"
-	say "未勾选 FanchmWrt 特性：不铺入 fwx 内核模块与主题"
+	# 内核补丁也要卸掉：不勾 FanchmWrt 时内核必须是 ImmortalWrt 原样，
+	# 否则「不勾就没有 fwx」这句话只对了一半 —— 内核里还留着它的字段。
+	rm -f "$SRC/target/linux/generic/hack-6.12/950-fwx-nf-conn-struct-user-hook.patch"
+	say "未勾选 FanchmWrt 特性：不铺入 fwx 内核模块与主题，内核保持 ImmortalWrt 原样"
 fi
 
 # ---------------------------------------------------------------------------

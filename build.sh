@@ -124,6 +124,31 @@ fi
 # --- 5. 下载与编译 ----------------------------------------------------------
 cd "$PROJECT_ROOT/openwrt"
 
+# ---------------------------------------------------------------------------
+# 内核补丁状态变化时，强制重新 prepare 内核
+#
+# 勾选 FanchmWrt 会往 target/linux/generic/hack-6.12/ 里放一个内核补丁
+# （给 struct nf_conn 加 fwx_data 字段，见 scripts/03-overlay.sh）。问题在于
+# OpenWrt 的 kernel prepare 只看 `$(LINUX_DIR)/.prepared` 这个戳，
+# **不会因为补丁目录里多了或少了一个文件就重来**。
+#
+# 后果很隐蔽：在同一个工作区里从「勾 FanchmWrt」切到「不勾」，内核里仍然
+# 留着 fwx_data；反过来切换则会缺字段、编译在 fwx_main.c 上报
+# "no member named 'fwx_data'"，而根因在内核侧，报错完全指不到。
+#
+# 所以这里给补丁状态留一个指纹，变了就清掉内核构建目录。
+# 代价是内核重编一次（十几分钟），换一个确定性 —— 值得。
+# ---------------------------------------------------------------------------
+mkdir -p "$PROJECT_ROOT/.generated"
+KERNEL_STAMP="$PROJECT_ROOT/.generated/kernel-fwx-patch"
+FWX_PATCH_FILE="$PROJECT_ROOT/openwrt/target/linux/generic/hack-6.12/950-fwx-nf-conn-struct-user-hook.patch"
+if [ -f "$FWX_PATCH_FILE" ]; then KERNEL_NOW=on; else KERNEL_NOW=off; fi
+if [ -f "$KERNEL_STAMP" ] && [ "$(cat "$KERNEL_STAMP")" != "$KERNEL_NOW" ]; then
+	say "内核补丁状态由 $(cat "$KERNEL_STAMP") 变为 $KERNEL_NOW —— 清理内核构建目录，强制重新 prepare"
+	make target/linux/clean >/dev/null 2>&1 || warn "target/linux/clean 返回非零，继续（多半是本来就没有内核构建目录）"
+fi
+printf '%s' "$KERNEL_NOW" > "$KERNEL_STAMP"
+
 say "下载源码包（失败不致命，编译阶段会重试）"
 make -j"$JOBS" download || warn "部分源码包下载失败，编译阶段 make 会重试"
 
