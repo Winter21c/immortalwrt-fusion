@@ -1,0 +1,25 @@
+#!/bin/sh
+#
+# 把 docker 的数据目录指到 /overlay/upper。
+#
+# 原因：squashfs 镜像的 / 是 overlayfs，而 docker 的 overlay2 存储驱动检测到
+# backing filesystem 是 overlay 会直接拒绝启动。而 /overlay/upper 就是底下
+# 那个 ext4 分区本身，指过去之后 docker 看到的是 ext4，overlay2 正常可用。
+#
+# ext4-combined 镜像没有独立的 /overlay/upper（/ 本身就是 ext4），这种情况
+# 保持上游默认的 /opt/docker/ 就好，所以这里加目录存在性判断，
+# 而不是无条件设置。
+#
+# （ImmortalWrt 自带的 dockerd 默认 data_root 是 /opt/docker/，
+#   对 squashfs 镜像没有做特殊处理，这一条是补它的缺口。）
+#
+# 排在上游 dockerd 包自带的 uci-defaults 之后，保证覆盖生效。
+#
+[ -d /overlay/upper ] || exit 0
+
+uci -q batch <<-EOF
+	set dockerd.globals.data_root='/overlay/upper/opt/docker'
+	commit dockerd
+EOF
+
+exit 0

@@ -1,0 +1,196 @@
+
+msgid "Network Setting"
+msgstr "网络设置"
+
+msgid "LAN"
+msgstr "LAN"
+
+msgid "WAN"
+msgstr "WAN"
+
+msgid "LAN Setting"
+msgstr "LAN设置"
+
+msgid "WAN Setting"
+msgstr "WAN设置"
+
+msgid "Work Mode"
+msgstr "工作模式"
+
+msgid "LAN Settings"
+msgstr "LAN 设置"
+
+msgid "Configure default LAN interface"
+msgstr "配置默认LAN接口"
+
+msgid "Protocol"
+msgstr "协议"
+
+msgid "IP Address"
+msgstr "IP 地址"
+
+msgid "Netmask"
+msgstr "子网掩码"
+
+msgid "Gateway"
+msgstr "网关"
+
+msgid "DHCP Server"
+msgstr "DHCP服务器"
+
+msgid "Enable DHCP"
+msgstr "启用DHCP"
+
+msgid "Start IP Offset"
+msgstr "起始地址"
+
+msgid "Pool Size"
+msgstr "地址池大小"
+
+msgid "Lease Time (minutes)"
+msgstr "租约时间（分钟）"
+
+msgid "Lease Time"
+msgstr "租约时间"
+
+msgid "Static"
+msgstr "手动设置"
+
+msgid "DHCP"
+msgstr "自动获取"
+
+msgid "10 minutes"
+msgstr "10分钟"
+
+msgid "15 minutes"
+msgstr "15分钟"
+
+msgid "30 minutes"
+msgstr "30分钟"
+
+msgid "45 minutes"
+msgstr "45分钟"
+
+msgid "1 hour"
+msgstr "1小时"
+
+msgid "2 hours"
+msgstr "2小时"
+
+msgid "3 hours"
+msgstr "3小时"
+
+msgid "4 hours"
+msgstr "4小时"
+
+msgid "5 hours"
+msgstr "5小时"
+
+msgid "6 hours"
+msgstr "6小时"
+
+msgid "8 hours"
+msgstr "8小时"
+
+msgid "12 hours"
+msgstr "12小时"
+
+msgid "1 day"
+msgstr "1天"
+
+msgid "2 days"
+msgstr "2天"
+
+msgid "3 days"
+msgstr "3天"
+
+msgid "7 days"
+msgstr "7天"
+
+msgid "Invalid IP address"
+msgstr "无效的IP地址"
+
+msgid "Invalid netmask"
+msgstr "无效的子网掩码"
+
+msgid "Invalid gateway"
+msgstr "无效的网关"
+
+msgid "Invalid DNS address"
+msgstr "无效的DNS地址"
+
+msgid "DNS1 must be set before DNS2"
+msgstr "必须先设置DNS1才能设置DNS2"
+
+msgid "PPPoE"
+msgstr "宽带拨号(PPPoE)"
+
+msgid "Username"
+msgstr "用户名"
+
+msgid "Password"
+msgstr "密码"
+
+msgid "Username is required"
+msgstr "用户名不能为空"
+
+msgid "Password is required"
+msgstr "密码不能为空"
+
+msgid "Gateway Mode"
+msgstr "网关模式"
+
+msgid "Bypass Mode"
+msgstr "旁路模式"
+
+msgid "Refresh"
+msgstr "刷新"
+
+msgid "Save"
+msgstr "保存"
+
+msgid "Loading..."
+msgstr "加载中..."
+
+msgid "Load failed"
+msgstr "加载失败"
+
+msgid "Saved successfully"
+msgstr "保存成功"
+
+msgid "Save failed"
+msgstr "保存失败"
+
+msgid "Updating LAN interface settings"
+msgstr "正在修改LAN口信息"
+
+msgid "This will take approximately 1 minute. Please access the management interface using the new IP address."
+msgstr "大约需要1分钟，请通过新的IP访问管理界面"
+
+msgid "WAN Settings"
+msgstr "WAN设置"
+
+msgid "Configure default WAN interface"
+msgstr "配置默认WAN接口"
+
+msgid "Are you sure you want to modify the LAN interface configuration?"
+msgstr "确定要修改lan口配置吗？"
+
+msgid "This will cause network disconnection."
+msgstr "修改后将会导致网络断开"
+
+msgid "Work Mode"
+msgstr "工作模式"
+
+msgid "Configure network work mode"
+msgstr "配置网络工作模式"
+
+msgid "Work mode affects behavior management and Internet audit. Please select the correct mode."
+msgstr "工作模式影响行为管理和上网审计，请正确选择模式"
+
+msgid "Bypass mode cannot count downstream traffic because traffic is directly forwarded to terminals at Layer 2 through the gateway."
+msgstr "旁路模式无法统计下行流量，因为流量是通过网关直接二层转发到了终端。"
+
+msgid "In bypass mode, it is recommended to disable IPv6 on terminals to prevent terminals from forwarding directly to the main router through IPv6."
+msgstr "旁路模式下建议关闭终端的IPv6，防止终端走IPv6直接转发到主路由。"
+

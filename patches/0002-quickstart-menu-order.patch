@@ -1,0 +1,11 @@
+--- a/luci/luci-app-quickstart/root/usr/share/luci/menu.d/luci-app-quickstart.json
++++ b/luci/luci-app-quickstart/root/usr/share/luci/menu.d/luci-app-quickstart.json
+@@ -1,7 +1,7 @@
+ {
+ 	"admin/quickstart/*": {
+ 		"title": "QuickStart",
+-		"order": 1,
++		"order": 2,
+ 		"action": {
+ 			"type": "template",
+ 			"path": "quickstart/home"

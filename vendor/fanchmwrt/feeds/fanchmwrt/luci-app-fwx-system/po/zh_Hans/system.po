@@ -1,0 +1,51 @@
+
+msgid "System Configuration"
+msgstr "系统配置"
+
+msgid "Configure system settings"
+msgstr "配置系统设置"
+
+msgid "LAN Interface"
+msgstr "LAN接口"
+
+msgid "LAN interface name for terminal detection. Default is bridge interface (br-lan). If LAN port is changed to physical interface, please modify to the corresponding name, such as eth0."
+msgstr "用于终端探测的LAN接口名称，系统默认为桥接接口(br-lan)。如果将LAN口修改为物理接口，请修改为对应的名称，例如eth0。"
+
+msgid "Invalid LAN interface name"
+msgstr "无效的LAN接口名称"
+
+msgid "TCP Connection Reset"
+msgstr "TCP连接重置"
+
+msgid "Send TCP reset packets when a TCP connection is filtered."
+msgstr "TCP连接被过滤时发送重置报文。"
+
+msgid "Refresh"
+msgstr "刷新"
+
+msgid "Save"
+msgstr "保存"
+
+msgid "Loading..."
+msgstr "加载中..."
+
+msgid "Load failed"
+msgstr "加载失败"
+
+msgid "Saved successfully"
+msgstr "保存成功"
+
+msgid "Save failed"
+msgstr "保存失败"
+
+msgid "Theme Mode"
+msgstr "主题模式"
+
+msgid "Light"
+msgstr "浅色"
+
+msgid "Dark"
+msgstr "暗色"
+
+msgid "Set fanchmwrt theme mode"
+msgstr "设置fanchmwrt主题的模式"

@@ -1,0 +1,514 @@
+msgid "User List"
+msgstr "终端列表"
+
+msgid "User Detail"
+msgstr "终端详情"
+
+msgid "User Info"
+msgstr "终端信息"
+
+
+msgid "Basic Info"
+msgstr "基本信息"
+
+msgid "App Statistics"
+msgstr "APP统计"
+
+msgid "Today Traffic"
+msgstr "今日流量"
+
+msgid "Today Upstream Traffic"
+msgstr "今日上行流量"
+
+msgid "Today Downstream Traffic"
+msgstr "今日下行流量"
+
+msgid "Today Top Apps"
+msgstr "今日常用APP"
+
+msgid "Online/Offline Records"
+msgstr "上下线记录"
+
+msgid "Visit Records"
+msgstr "访问记录"
+
+msgid "MAC Address"
+msgstr "MAC地址"
+
+msgid "IP Address"
+msgstr "IP地址"
+
+msgid "Signal"
+msgstr "信号强度"
+
+msgid "Remark"
+msgstr "备注"
+
+msgid "Hostname"
+msgstr "主机名"
+
+msgid "Today Internet Duration"
+msgstr "今日上网时长"
+
+msgid "Today Online Duration"
+msgstr "今日在线时长"
+
+msgid "Online Status"
+msgstr "在线状态"
+
+msgid "App Name"
+msgstr "APP名称"
+
+msgid "First Visit"
+msgstr "开始访问时间"
+
+msgid "Last Visit"
+msgstr "最后访问时间"
+
+msgid "Duration"
+msgstr "访问时长"
+
+msgid "Filter Status"
+msgstr "过滤状态"
+
+msgid "Collecting data..."
+msgstr "正在收集数据..."
+
+msgid "Back to User List"
+msgstr "返回终端列表"
+
+msgid "Back"
+msgstr "返回"
+
+msgid "Missing MAC parameter"
+msgstr "缺少MAC参数"
+
+msgid "Online"
+msgstr "在线"
+
+msgid "Offline"
+msgstr "离线"
+
+msgid "Filtered"
+msgstr "已过滤"
+
+msgid "Unfiltered"
+msgstr "未过滤"
+
+msgid "Detail"
+msgstr "详情"
+
+msgid "Prev Page"
+msgstr "上一页"
+
+msgid "Next Page"
+msgstr "下一页"
+
+msgid "Total"
+msgstr "共"
+
+msgid "Records"
+msgstr "条记录"
+
+msgid "Showing"
+msgstr "显示"
+
+msgid "Please enter a valid remark"
+msgstr "请输入合法的备注"
+
+msgid "Operation succeeded"
+msgstr "设置成功"
+
+msgid "Unknown App"
+msgstr "未知APP"
+
+msgid "App Time Statistics"
+msgstr "APP时间统计"
+
+msgid "Visit Time"
+msgstr "访问时长"
+
+msgid "Percentage"
+msgstr "占比"
+
+msgid "Device Info"
+msgstr "终端信息"
+
+msgid "Upstream Rate"
+msgstr "上行速率"
+
+msgid "Downstream Rate"
+msgstr "下行速率"
+
+msgid "Rate"
+msgstr "速率"
+
+msgid "Common App(TOP5)"
+msgstr "常用APP(TOP5)"
+
+msgid "Common App"
+msgstr "常用APP"
+
+msgid "Active Apps"
+msgstr "活跃APP"
+
+msgid "Visiting URL"
+msgstr "正在访问URL"
+
+msgid "Actions"
+msgstr "操作"
+
+msgid "Edit Remark"
+msgstr "修改备注"
+
+msgid "Cancel"
+msgstr "取消"
+
+msgid "Confirm"
+msgstr "确定"
+
+msgid "Upstream"
+msgstr "上行"
+
+msgid "Downstream"
+msgstr "下行"
+
+msgid "h"
+msgstr "时"
+
+msgid "m"
+msgstr "分"
+
+msgid "s"
+msgstr "秒"
+
+msgid "min"
+msgstr "分钟"
+
+msgid "No records"
+msgstr "暂无记录"
+
+msgid "Online Event"
+msgstr "上线"
+
+msgid "Offline Event"
+msgstr "离线"
+
+msgid "Unknown App"
+msgstr "未知APP"
+
+msgid "Today Traffic Statistics (24 Hours)"
+msgstr "今日流量统计（24小时）"
+
+msgid "Upstream Traffic"
+msgstr "上行流量"
+
+msgid "Downstream Traffic"
+msgstr "下行流量"
+
+msgid "Traffic"
+msgstr "流量"
+
+msgid "Today Top Apps Statistics (24 Hours)"
+msgstr "今日常用APP统计（24小时）"
+
+msgid "No app usage in this period"
+msgstr "该时段无APP使用记录"
+
+msgid "No traffic data in this period"
+msgstr "该时段暂无流量记录"
+
+msgid "Type"
+msgstr "类型"
+
+msgid "Time"
+msgstr "时间"
+
+msgid "Loading..."
+msgstr "加载中..."
+
+msgid "Today Traffic Statistics"
+msgstr "今日流量统计"
+
+msgid "Today Top Apps"
+msgstr "今日常用APP"
+
+msgid "Online/Offline Records"
+msgstr "上下线记录"
+
+msgid "Today Traffic"
+msgstr "今日流量"
+
+msgid "Today Online Duration"
+msgstr "今日在线时长"
+
+msgid "Today Internet Duration"
+msgstr "今日上网时长"
+
+msgid "Hostname"
+msgstr "主机名"
+
+msgid "App Name"
+msgstr "APP名称"
+
+msgid "First Visit"
+msgstr "开始访问时间"
+
+msgid "Last Visit"
+msgstr "最后访问时间"
+
+msgid "Duration"
+msgstr "访问时长"
+
+msgid "Filter Status"
+msgstr "过滤状态"
+
+
+msgid "Active"
+msgstr "活跃"
+
+msgid "Internet Permission"
+msgstr "联网权限"
+
+msgid "Unrestricted"
+msgstr "无限制"
+
+msgid "Internet Permission Detail"
+msgstr "联网权限详情"
+
+msgid "Terminal"
+msgstr "终端"
+
+msgid "Current Status"
+msgstr "当前状态"
+
+msgid "Effective App Filter Rules"
+msgstr "应用过滤生效规则"
+
+msgid "Rule Name"
+msgstr "规则名称"
+
+msgid "Mode"
+msgstr "模式"
+
+msgid "Rule Detail"
+msgstr "规则详情"
+
+msgid "Time Rule"
+msgstr "时间规则"
+
+msgid "Effective Access Control Rules"
+msgstr "上网控制生效规则"
+
+msgid "Hit Detail"
+msgstr "命中详情"
+
+msgid "All Users"
+msgstr "所有终端"
+
+msgid "Selected User"
+msgstr "指定终端"
+
+msgid "Rule"
+msgstr "规则"
+
+msgid "Category"
+msgstr "分类"
+
+msgid "App Count"
+msgstr "APP个数"
+
+msgid "Time Range"
+msgstr "时间段"
+
+msgid "Flow"
+msgstr "流量"
+
+msgid "Used"
+msgstr "已用"
+
+msgid "Limit"
+msgstr "限制"
+
+msgid "Weekday"
+msgstr "周"
+
+msgid "Sun"
+msgstr "日"
+
+msgid "Mon"
+msgstr "一"
+
+msgid "Tue"
+msgstr "二"
+
+msgid "Wed"
+msgstr "三"
+
+msgid "Thu"
+msgstr "四"
+
+msgid "Fri"
+msgstr "五"
+
+msgid "Sat"
+msgstr "六"
+
+msgid "Daily Duration"
+msgstr "每日时长"
+
+msgid "Daily Flow"
+msgstr "每日流量"
+
+msgid "Matched Rule"
+msgstr "匹配规则"
+
+msgid "Rule Type"
+msgstr "规则类型"
+
+msgid "App Filter"
+msgstr "应用过滤"
+
+msgid "Access Control"
+msgstr "上网控制"
+
+msgid "Restricted Apps"
+msgstr "受限应用"
+
+msgid "Remark updated successfully"
+msgstr "备注修改成功"
+
+msgid "Failed to update remark"
+msgstr "备注修改失败"
+
+msgid "Join Blacklist"
+msgstr "加入黑名单"
+
+msgid "Remove Blacklist"
+msgstr "解除黑名单"
+
+msgid "Added to blacklist"
+msgstr "已加入黑名单"
+
+msgid "Are you sure you want to join the blacklist? After joining, this terminal will be disconnected from the Internet."
+msgstr "确定要加入黑名单吗？加入后该终端将会断网。"
+
+msgid "Removed from blacklist"
+msgstr "已解除黑名单"
+
+msgid "Operation failed"
+msgstr "操作失败"
+
+msgid "Blacklist"
+msgstr "黑名单"
+
+msgid "Joined Internet Blacklist"
+msgstr "命中上网黑名单"
+
+msgid "Connection Count"
+msgstr "连接数"
+
+msgid "Session Count"
+msgstr "会话数"
+
+msgid "Parental Control"
+msgstr "Parental Control"
+
+msgid "Parental Control Rules"
+msgstr "行为管理规则"
+
+msgid "Function Module"
+msgstr "功能模块"
+
+msgid "Effective Condition"
+msgstr "生效条件"
+
+msgid "Today's Status"
+msgstr "今日状态"
+
+msgid "No parental control rules"
+msgstr "暂无行为管理规则"
+
+msgid "App Restricted"
+msgstr "应用受限"
+
+msgid "Disconnected"
+msgstr "未联网"
+
+msgid "Not Matched"
+msgstr "未匹配"
+
+msgid "Not effective today"
+msgstr "今日不生效"
+
+msgid "Unlimited today"
+msgstr "今日不限"
+
+msgid "Matched"
+msgstr "已匹配"
+
+msgid "Block"
+msgstr "拉黑"
+
+msgid "Unblock"
+msgstr "解除"
+
+msgid "Historical Statistics"
+msgstr "历史数据统计"
+
+msgid "Last 30 days, including today"
+msgstr "最近30天（含今天）"
+
+msgid "Refresh"
+msgstr "刷新"
+
+msgid "Missing dates are left blank. App duration shows each day's Top 3; category durations may overlap."
+msgstr "无记录日期留空。应用时长展示每日最常用的3款应用；分类时长可能存在重叠。"
+
+msgid "Daily Traffic"
+msgstr "每日流量"
+
+msgid "Daily Internet and Online Duration"
+msgstr "每日上网与在线时长"
+
+msgid "Daily App Category Duration"
+msgstr "每日应用分类时长"
+
+msgid "Daily Top 3 App Duration"
+msgstr "每日最常用应用时长"
+
+msgid "Upload Traffic"
+msgstr "上行流量"
+
+msgid "Download Traffic"
+msgstr "下行流量"
+
+msgid "Internet Duration"
+msgstr "上网时长"
+
+msgid "Online Duration"
+msgstr "在线时长"
+
+msgid "Hours"
+msgstr "小时"
+
+msgid "Games"
+msgstr "游戏"
+
+msgid "Video"
+msgstr "视频"
+
+msgid "Chat"
+msgstr "聊天"
+
+msgid "Shopping"
+msgstr "购物"
+
+msgid "Music"
+msgstr "音乐"
+
+msgid "No data"
+msgstr "暂无数据"
+
+msgid "Failed to load history. Please retry."
+msgstr "历史数据加载失败，请重试。"

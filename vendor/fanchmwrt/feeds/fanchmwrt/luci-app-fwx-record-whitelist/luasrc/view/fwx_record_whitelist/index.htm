@@ -1,0 +1,483 @@
+<%+header%>
+<link rel="stylesheet" href="<%=resource%>/css/common.css">
+<script type="text/javascript" src="<%=resource%>/jquery-3.7.1.min.js"></script>
+<script type="text/javascript" src="<%=resource%>/common.js"></script>
+
+<style>
+    .whitelist-container {
+        max-width: 1000px;
+        margin-left: 10px;
+        padding: 5px;
+    }
+
+    .whitelist-title {
+        font-size: 18px;
+        font-weight: bold;
+        margin-bottom: 20px;
+    }
+
+    .whitelist-desc {
+        margin-top: -12px;
+        margin-bottom: 14px;
+        color: #666;
+        font-size: 13px;
+    }
+
+    .whitelist-table {
+        width: 100%;
+        margin-top: 10px;
+    }
+
+    .add-whitelist-btn {
+        margin: 20px 0;
+        padding: 10px 20px;
+        background-color: #2885e8;
+        color: white;
+        border: none;
+        border-radius: 3px;
+        cursor: pointer;
+        font-size: 14px;
+    }
+
+    .add-whitelist-btn:hover {
+        background-color: #1e6bb8;
+    }
+
+    .delete-btn {
+        padding: 5px 12px;
+        background-color: #ff4444;
+        color: white;
+        border: none;
+        border-radius: 3px;
+        cursor: pointer;
+        font-size: 13px;
+    }
+
+    .delete-btn:hover {
+        background-color: #cc0000;
+    }
+
+    .record-whitelist-modal {
+        display: none;
+        position: fixed !important;
+        inset: 0 !important;
+        width: 100vw !important;
+        height: 100vh !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        background-color: rgba(0, 0, 0, 0.5);
+        z-index: 20000;
+        justify-content: center;
+        align-items: center;
+    }
+
+    .record-whitelist-modal-content {
+        background-color: #2d2d2d;
+        color: #ffffff;
+        padding: 30px;
+        border-radius: 8px;
+        width: 80vw;
+        max-width: 700px;
+        max-height: 80vh;
+        display: flex;
+        flex-direction: column;
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+    }
+
+    .record-whitelist-modal-header {
+        font-size: 20px;
+        font-weight: bold;
+        margin-bottom: 20px;
+        color: #fff;
+    }
+
+    .user-list {
+        flex: 1;
+        overflow-y: auto;
+        margin: 15px 0;
+        border: 1px solid #555;
+        border-radius: 4px;
+        background-color: #1e1e1e;
+    }
+
+    .user-item {
+        padding: 12px;
+        border-bottom: 1px solid #444;
+        display: flex;
+        align-items: center;
+        cursor: pointer;
+        background-color: #1e1e1e;
+    }
+
+    .user-item:hover {
+        background-color: #2a2a2a;
+    }
+
+    .user-item:last-child {
+        border-bottom: none;
+    }
+
+    .user-item input[type="checkbox"] {
+        margin-right: 12px;
+        cursor: pointer;
+    }
+
+    .user-info {
+        flex: 1;
+    }
+
+    .user-mac {
+        font-weight: bold;
+        color: #fff;
+        margin-bottom: 4px;
+    }
+
+    .modal-btn {
+        padding: 8px 20px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 14px;
+    }
+
+    .modal-btn-primary {
+        background-color: #2885e8;
+        color: white;
+        border: none;
+    }
+
+    .modal-btn-primary:hover {
+        background-color: #1e6bb8;
+    }
+
+    .modal-btn-secondary {
+        border: 1px solid;
+    }
+
+    .modal-btn-secondary:hover {
+        opacity: 0.8;
+    }
+
+    .empty-state {
+        text-align: center;
+        padding: 40px;
+        color: #ccc;
+    }
+
+    .success-message {
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background-color: rgba(0, 0, 0, 0.5);
+        z-index: 1001;
+        justify-content: center;
+        align-items: center;
+    }
+
+    .success-content {
+        background-color: rgba(0, 0, 0, 0.7);
+        padding: 20px 30px;
+        border-radius: 5px;
+        color: white;
+        text-align: center;
+    }
+</style>
+
+<script type="text/javascript">//<![CDATA[
+    var _NoWhitelistEntriesYet = "<%:No whitelist entries yet%>";
+    var _Delete = "<%:Delete%>";
+    var _NoAvailableDevices = "<%:No available devices to add%>";
+    var _PleaseSelectDevice = "<%:Please select at least one device%>";
+    var _AddSuccess = "<%:Add success%>";
+    var _AddFailed = "<%:Add failed%>";
+    var _ConfirmRemove = "<%:Are you sure you want to remove this device from whitelist?%>";
+    var _DeleteSuccess = "<%:Delete success%>";
+    var _DeleteFailed = "<%:Delete failed%>";
+
+    var page = 1;
+    var page_size = 15;
+    var total_page = 1;
+    var total_num = 0;
+    var whitelistData = { list: [] };
+    var allUsers = [];
+
+    function showMessage(msg, ok) {
+        if (typeof showCommonModal === "function") {
+            showCommonModal(msg, 1600, ok ? "success" : "error");
+            return;
+        }
+        var modal = document.getElementById("successMessage");
+        var txt = document.getElementById("successMessageText");
+        txt.textContent = msg || "";
+        modal.style.display = "flex";
+        setTimeout(function() { modal.style.display = "none"; }, 1500);
+    }
+
+    function normalizeMac(mac) {
+        return (mac || "").replace(/^\s+|\s+$/g, "").toUpperCase();
+    }
+
+    function loadWhitelistData() {
+        new XHR().get("<%=url('admin/internet_record_whitelist_api/get_record_whitelist')%>", {
+            page: page,
+            page_size: page_size
+        }, function(x, data) {
+            var resp = data || {};
+            whitelistData.list = Array.isArray(resp.list) ? resp.list : [];
+            total_num = parseInt(resp.total_num || 0, 10);
+            total_page = parseInt(resp.total_page || 1, 10);
+            if (total_page < 1) total_page = 1;
+            page = parseInt(resp.page || page, 10);
+            if (page < 1) page = 1;
+            renderWhitelistTable();
+            renderPagination();
+        });
+    }
+
+    function renderWhitelistTable() {
+        var tableBody = document.getElementById("whitelistTableBody");
+        tableBody.innerHTML = "";
+
+        if (!whitelistData.list || whitelistData.list.length === 0) {
+            var emptyRow = document.createElement("tr");
+            emptyRow.innerHTML = '<td colspan="5" style="text-align: center; padding: 30px; color: #999;">' + _NoWhitelistEntriesYet + '</td>';
+            tableBody.appendChild(emptyRow);
+            return;
+        }
+
+        whitelistData.list.forEach(function(user, index) {
+            var row = document.createElement("tr");
+            var no = (page - 1) * page_size + index + 1;
+            row.innerHTML =
+                '<td>' + no + '</td>'
+                + '<td style="font-family: monospace; font-weight: bold;">' + (user.mac || "--") + '</td>'
+                + '<td>' + (user.hostname || "--") + '</td>'
+                + '<td>' + (user.nickname || "--") + '</td>'
+                + '<td><button type="button" class="delete-btn" onclick="removeWhitelistUser(\'' + (user.mac || "") + '\')">' + _Delete + '</button></td>';
+            tableBody.appendChild(row);
+        });
+    }
+
+    function renderPagination() {
+        var p = document.getElementById("pagination");
+        if (total_page <= 1) {
+            p.innerHTML = "";
+            return;
+        }
+        var html = '<div style="display:flex;gap:6px;align-items:center;justify-content:center;">';
+        html += '<button type="button" class="cbi-button" ' + (page <= 1 ? 'disabled' : 'onclick="gotoPage(' + (page - 1) + ')"') + '><%:Prev Page%></button>';
+        html += '<span>' + page + ' / ' + total_page + '</span>';
+        html += '<button type="button" class="cbi-button" ' + (page >= total_page ? 'disabled' : 'onclick="gotoPage(' + (page + 1) + ')"') + '><%:Next Page%></button>';
+        html += '<span style="color:#999;"><%:Total%> ' + total_num + ' <%:Records%></span>';
+        html += '</div>';
+        p.innerHTML = html;
+    }
+
+    function gotoPage(p) {
+        if (p < 1 || p > total_page || p === page) return;
+        page = p;
+        loadWhitelistData();
+    }
+
+    function getAllUsersData(done) {
+        new XHR().get("<%=url('admin/internet_record_whitelist_api/get_all_users')%>", null,
+            function(x, data) {
+                if (data && data.data && Array.isArray(data.data.list)) {
+                    allUsers = data.data.list;
+                } else {
+                    allUsers = [];
+                }
+                if (typeof done === "function") done();
+            },
+            function() {
+                allUsers = [];
+                if (typeof done === "function") done();
+            }
+        );
+    }
+
+    function getAllWhitelistMacSet(done) {
+        var set = {};
+        new XHR().get("<%=url('admin/internet_record_whitelist_api/get_record_whitelist_all')%>", null,
+            function(x, data) {
+                if (data && data.data && Array.isArray(data.data.list)) {
+                    data.data.list.forEach(function(item) {
+                        var m = normalizeMac(item.mac || "");
+                        if (m) set[m] = true;
+                    });
+                }
+                if (typeof done === "function") done(set);
+            },
+            function() {
+                if (typeof done === "function") done(set);
+            }
+        );
+    }
+
+    function showAddModal() {
+        document.getElementById("addModal").style.display = "flex";
+        document.getElementById("userList").innerHTML = '<div class="empty-state"><%:Loading...%></div>';
+        getAllWhitelistMacSet(function(whitelistSet) {
+            getAllUsersData(function() {
+                renderAddUserList(whitelistSet);
+            });
+        });
+    }
+
+    function renderAddUserList(whitelistSet) {
+        var userList = document.getElementById("userList");
+        userList.innerHTML = "";
+
+        whitelistSet = whitelistSet || {};
+
+        var availableUsers = allUsers.filter(function(user) {
+            var m = normalizeMac(user.mac || "");
+            return m && !whitelistSet[m];
+        });
+
+        if (availableUsers.length === 0) {
+            var emptyMsg = document.createElement("div");
+            emptyMsg.className = "empty-state";
+            emptyMsg.innerHTML = _NoAvailableDevices;
+            userList.appendChild(emptyMsg);
+            return;
+        }
+
+        availableUsers.forEach(function(user) {
+            var mac = normalizeMac(user.mac || "");
+            if (!mac) return;
+
+            var extraInfo = "";
+            if (user.nickname && user.nickname.trim() !== "") {
+                extraInfo = user.nickname;
+            } else if (user.hostname && user.hostname.trim() !== "" && user.hostname !== "*") {
+                extraInfo = user.hostname;
+            } else if (user.ip && user.ip.trim() !== "") {
+                extraInfo = user.ip;
+            }
+
+            var displayText = extraInfo ? (mac + " (" + extraInfo + ")") : mac;
+            var userElement = document.createElement("div");
+            userElement.className = "user-item";
+            userElement.innerHTML =
+                '<input type="checkbox" value="' + mac + '" id="user_' + mac.replace(/:/g, "_") + '">'
+                + '<div class="user-info"><div class="user-mac">' + displayText + '</div></div>';
+            userList.appendChild(userElement);
+        });
+    }
+
+    function closeAddModal() {
+        document.getElementById("addModal").style.display = "none";
+    }
+
+    function addSelectedUsers() {
+        var checkboxes = document.querySelectorAll('#userList input[type="checkbox"]:checked');
+        if (!checkboxes || checkboxes.length === 0) {
+            showMessage(_PleaseSelectDevice, false);
+            return;
+        }
+
+        var selectedMacs = [];
+        Array.prototype.forEach.call(checkboxes, function(item) {
+            selectedMacs.push(item.value);
+        });
+
+        new XHR().post("<%=url('admin/internet_record_whitelist_api/add_record_whitelist')%>",
+            { data: JSON.stringify({ mac_list: selectedMacs }) },
+            function(x, data) {
+                if (data && data.code == 2000) {
+                    closeAddModal();
+                    page = 1;
+                    loadWhitelistData();
+                    showMessage(_AddSuccess, true);
+                } else {
+                    showMessage(_AddFailed, false);
+                }
+            },
+            function() {
+                showMessage(_AddFailed, false);
+            }
+        );
+    }
+
+    function removeWhitelistUser(mac) {
+        if (!confirm(_ConfirmRemove)) {
+            return;
+        }
+
+        new XHR().post("<%=url('admin/internet_record_whitelist_api/del_record_whitelist')%>",
+            { mac: mac },
+            function(x, data) {
+                if (data && data.code == 2000) {
+                    loadWhitelistData();
+                    showMessage(_DeleteSuccess, true);
+                } else {
+                    showMessage(_DeleteFailed, false);
+                }
+            },
+            function() {
+                showMessage(_DeleteFailed, false);
+            }
+        );
+    }
+
+    window.gotoPage = gotoPage;
+    window.showAddModal = showAddModal;
+    window.closeAddModal = closeAddModal;
+    window.addSelectedUsers = addSelectedUsers;
+    window.removeWhitelistUser = removeWhitelistUser;
+
+    window.onload = function() {
+        loadWhitelistData();
+    };
+//]]></script>
+
+<div class="cbi-section cbi-tblsection">
+    <div class="whitelist-container">
+        <div class="whitelist-title"><%:Record Whitelist%></div>
+        <div class="whitelist-desc">加入白名单的用户不再保留应用访问记录。</div>
+
+        <button type="button" class="add-whitelist-btn" onclick="showAddModal()">+ <%:Add to Whitelist%></button>
+
+        <table class="common-table whitelist-table">
+            <thead>
+                <tr>
+                    <th><%:No.%></th>
+                    <th><%:MAC Address%></th>
+                    <th><%:Hostname%></th>
+                    <th><%:Nickname%></th>
+                    <th><%:Operation%></th>
+                </tr>
+            </thead>
+            <tbody id="whitelistTableBody">
+                <tr>
+                    <td colspan="5" style="text-align: center; padding: 30px; color: #999;"><%:Loading...%></td>
+                </tr>
+            </tbody>
+        </table>
+        <div id="pagination" style="margin-top: 12px;"></div>
+    </div>
+</div>
+
+<div id="addModal" class="record-whitelist-modal">
+    <div class="record-whitelist-modal-content">
+        <div class="record-whitelist-modal-header"><%:Add to Whitelist%></div>
+        <div class="user-list" id="userList"></div>
+        <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px;">
+            <button type="button" class="modal-btn modal-btn-primary" onclick="addSelectedUsers()"><%:OK%></button>
+            <button type="button" class="modal-btn modal-btn-secondary" onclick="closeAddModal()"><%:Cancel%></button>
+        </div>
+    </div>
+</div>
+
+<div class="success-message" id="successMessage">
+    <div class="success-content">
+        <p id="successMessageText" style="margin: 0;"></p>
+    </div>
+</div>
+<%+footer%>

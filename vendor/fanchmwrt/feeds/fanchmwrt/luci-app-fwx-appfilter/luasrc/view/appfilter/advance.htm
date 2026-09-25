@@ -1,0 +1,76 @@
+<link rel="stylesheet" href="<%=resource%>/css/common.css">
+<script src="<%=resource%>/jquery-3.7.1.min.js"></script>
+<script src="<%=resource%>/common.js"></script>
+
+<div class="fwx-form-card">
+  <div class="form-title"><%:Advanced Settings%></div>
+  <div class="form-desc"><%:Enable or disable the application filter feature.%></div>
+
+  <div class="form-row">
+    <label class="form-label" for="enableSwitch"><%:Enable App Filter%></label>
+    <label class="switch">
+      <input type="checkbox" id="enableSwitch" name="enableSwitch" />
+      <span class="slider"></span>
+    </label>
+  </div>
+
+  <div class="form-row" style="justify-content:flex-end; gap:8px;">
+    <button class="btn btn-secondary" type="button" id="appfilter-refresh"><%:Refresh%></button>
+    <button class="btn" type="button" id="appfilter-save"><%:Save%></button>
+  </div>
+  <div class="status-tip" id="appfilter-tip"></div>
+</div>
+
+<script type="text/javascript">//<![CDATA[
+  var _SavedSuccessfully = '<%:Saved successfully%>';
+  var _SaveFailed = '<%:Save failed%>';
+  var _Loading = '<%:Loading...%>';
+  var _LoadFailed = '<%:Load failed%>';
+  var apiGet = "<%=url('admin/network/get_app_filter_adv')%>";
+  var apiSet = "<%=url('admin/network/set_app_filter_adv')%>";
+
+  function showModal(msg, ok) {
+    if (typeof showCommonModal === 'function') {
+      showCommonModal(msg || '', 2000, ok ? 'success' : 'error');
+    }
+  }
+
+  function refreshData() {
+    $('#appfilter-tip').text(_Loading);
+    $.getJSON(apiGet, function(data) {
+      if (data && data.code === 0 && data.data) {
+        $('#enableSwitch').prop('checked', data.data.enable == 1);
+        $('#appfilter-tip').text('');
+      } else {
+        $('#appfilter-tip').text(_LoadFailed);
+      }
+    }).fail(function() {
+      $('#appfilter-tip').text(_LoadFailed);
+    });
+  }
+
+  function saveData() {
+    var enable = $('#enableSwitch').is(':checked') ? 1 : 0;
+    $('#appfilter-save').prop('disabled', true);
+    $.ajax({
+      url: apiSet,
+      method: 'POST',
+      data: { enable: enable },
+      dataType: 'json'
+    }).done(function(data) {
+      if (data && data.code === 0) {
+        showModal(_SavedSuccessfully, true);
+      } else {
+        showModal(_SaveFailed, false);
+      }
+    }).fail(function() {
+      showModal(_SaveFailed, false);
+    }).always(function() {
+      $('#appfilter-save').prop('disabled', false);
+    });
+  }
+
+  $('#appfilter-refresh').on('click', refreshData);
+  $('#appfilter-save').on('click', saveData);
+  $(refreshData);
+//]]></script>

@@ -1,0 +1,21 @@
+#!/bin/sh
+#
+# 给容器日志封顶。
+#
+# 上游 /etc/config/dockerd 里 log_driver 是**注释掉**的，也就是走 docker
+# 默认的 json-file 驱动 —— 它不轮转、不封顶。一个话多的容器（nginx、
+# 各种面板、跑挂了的应用）能把盘写满，而写满之后的现象是「所有服务
+# 莫名其妙开始失败」，很难联想到是容器日志。
+#
+# local 驱动自带轮转（默认 20MB × 5），够用且不会失控。
+# 代价是 `docker logs` 的行为与 json-file 略有差别 —— 对新装的固件没有影响。
+#
+# 想改回 json-file 并自己设 max-size/max-file 的话，把下面这行换成
+# 在 /etc/docker/daemon.json 里写 log-opts 即可。
+#
+uci -q batch <<-EOF
+	set dockerd.globals.log_driver='local'
+	commit dockerd
+EOF
+
+exit 0

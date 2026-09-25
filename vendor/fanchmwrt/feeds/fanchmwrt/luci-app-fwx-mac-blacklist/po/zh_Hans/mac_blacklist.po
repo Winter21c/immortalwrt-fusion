@@ -1,0 +1,29 @@
+msgid "Internet Blacklist"
+msgstr "上网黑名单"
+
+msgid "No blacklist entries yet"
+msgstr "暂无黑名单终端"
+
+msgid "Remove Blacklist"
+msgstr "解除黑名单"
+
+msgid "Removed from blacklist"
+msgstr "已解除黑名单"
+
+msgid "Operation failed"
+msgstr "操作失败"
+
+msgid "MAC Address"
+msgstr "MAC地址"
+
+msgid "Hostname"
+msgstr "主机名"
+
+msgid "Remark"
+msgstr "备注"
+
+msgid "Operation"
+msgstr "操作"
+
+msgid "Loading..."
+msgstr "加载中..."

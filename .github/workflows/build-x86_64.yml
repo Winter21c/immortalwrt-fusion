@@ -1,0 +1,442 @@
+# ===========================================================================
+# ImmortalWrt × FanchmWrt × iStoreOS 在线编译（仅 x86_64）
+#
+# 在 GitHub 的服务器上编译，不用本地装 30GB 工具链。
+#
+# 三种触发方式：
+#   1. 手动：Actions → 「构建 x86_64 固件」→ Run workflow，按需勾选特性与参数
+#   2. 打 tag：push 一个 v* 标签，编译完自动发同名 Release
+#   3. 定时：默认注释掉，见文件末尾
+#
+# 默认行为：**构建成功后直接发 Release**（create_release 默认勾选）。
+# 不想要的话把那个勾去掉，改上传成构建产物。
+# ===========================================================================
+name: 构建 x86_64 固件
+
+on:
+  workflow_dispatch:
+    inputs:
+      # ---------------------------------------------------------------------
+      # 特性选择：两个独立的复选框
+      # ---------------------------------------------------------------------
+      with_fanchmwrt:
+        description: '包含 FanchmWrt 特性（fwx 应用识别 / 仪表盘 / 高级·普通模式 / FanchmWrt 主题）'
+        type: boolean
+        default: true
+      with_istoreos:
+        description: '包含 iStoreOS 特性（QuickStart 首页 / iStore 应用商店 / argon 主题）'
+        type: boolean
+        default: true
+
+      # ---------------------------------------------------------------------
+      # 固件参数
+      # ---------------------------------------------------------------------
+      lan_ip:
+        description: '管理地址（LAN IP），可带前缀长度如 192.168.100.1/24'
+        type: string
+        default: '192.168.1.1'
+      rootfs_size:
+        description: '固件大小 / rootfs 分区（MB）'
+        type: choice
+        options: ['512', '1024', '2048', '4096', '8192']
+        default: '1024'
+      enable_docker:
+        description: '包含 Docker（dockerd + docker-compose + Dockerman 图形界面）'
+        type: boolean
+        default: true
+
+      # ---------------------------------------------------------------------
+      # 发布
+      # ---------------------------------------------------------------------
+      create_release:
+        description: '构建成功后创建 Release'
+        type: boolean
+        default: true
+      release_tag:
+        description: 'Release 标签（留空 = 自动用 日期-时间）'
+        type: string
+        required: false
+      upload_artifact:
+        description: '同时把镜像上传成构建产物（Actions 页面可直接下载）'
+        type: boolean
+        default: true
+
+  push:
+    tags:
+      - 'v*'
+
+  # -------------------------------------------------------------------------
+  # 定时构建
+  #
+  # ⚠️ GitHub Actions 的 cron **一律按 UTC** 解释，与仓库或 runner 的时区无关。
+  #    所以不能写 '0 2 * * *' —— 那是北京时间上午 10 点。
+  #    18:00 UTC = 次日 02:00（UTC+8），这才是想要的「凌晨 2 点」。
+  #
+  # 上游会腐烂：v2ray-geodata 的规则数据 tag 只保留约三个月，mosdns / argon
+  # 这类第三方 feed 也会变。每周跑一次能在用户之前发现，而不是等别人 clone
+  # 后构建失败来提 issue。不需要就保持注释。
+  # -------------------------------------------------------------------------
+  # schedule:
+  #   - cron: '0 18 * * 0'   # 每周日 18:00 UTC = 周一 02:00（UTC+8）
+
+# 创建 Release 需要写权限。
+permissions:
+  contents: write
+
+# 同一 ref 同时只跑一个，避免两次构建互相覆盖产物。
+concurrency:
+  group: build-x86_64-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    # -----------------------------------------------------------------------
+    # 任务名里带上全部参数 —— 运行列表一眼就能看出这次编的是什么。
+    #
+    # 两个坑，都在现有项目里真踩过：
+    #
+    #   1. 定时/打标签触发时 inputs.* 全是空的，要按事件类型给默认值，
+    #      否则任务名会显示成默认值、与实际编出来的相反。
+    #
+    #   2. boolean 的 false 是**假值**。直接写 `inputs.enable_docker || 'true'`
+    #      会在用户**取消勾选**时得到 'true'，也就是显示成与事实相反的
+    #      「含 Docker」。format('{0}', false) 会得到字符串 "false"（真值），
+    #      才不会被 || 吃掉。
+    # -----------------------------------------------------------------------
+    name: >-
+      编译 x86_64 · ${{
+        github.event_name == 'workflow_dispatch' && format('FanchmWrt={0} iStoreOS={1}',
+          inputs.with_fanchmwrt, inputs.with_istoreos) || 'FanchmWrt=true iStoreOS=true'
+      }} · LAN=${{
+        github.event_name == 'workflow_dispatch' && inputs.lan_ip || '192.168.1.1'
+      }} · 分区=${{
+        github.event_name == 'workflow_dispatch' && inputs.rootfs_size || '1024'
+      }}MB · Docker=${{
+        github.event_name == 'workflow_dispatch' && format('{0}', inputs.enable_docker) || 'true'
+      }}
+    runs-on: ubuntu-24.04
+    # GitHub 单个 job 上限 360 分钟。整棵 OpenWrt 在 4 核 runner 上约 2~3 小时。
+    timeout-minutes: 350
+
+    env:
+      # 慢镜像保护：scripts/download.pl 会把 CURL_OPTIONS 拼进每一次 curl，
+      # 让它 60 秒内平均速率低于 50KB/s 就放弃该镜像、换下一个，
+      # 而不是在一个「能用但极慢」的源上挂几个小时。
+      CURL_OPTIONS: --speed-limit 51200 --speed-time 60
+
+    steps:
+      # ---------------------------------------------------------------------
+      # 构建参数的唯一来源。
+      #
+      # 注意这里**不能**写 `inputs.x || 'default'`：boolean 的 false 是假值，
+      # `false || true` 会得到 'true' —— 用户取消了勾选却被编进去。
+      # 交给 build.sh 里的 normalize_bool 统一转成 1/0 才是可靠的做法。
+      # ---------------------------------------------------------------------
+      - name: 确定构建参数
+        run: |
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            {
+              echo "WITH_FANCHMWRT=${{ inputs.with_fanchmwrt }}"
+              echo "WITH_ISTOREOS=${{ inputs.with_istoreos }}"
+              echo "ENABLE_DOCKER=${{ inputs.enable_docker }}"
+              echo "LAN_IP=${{ inputs.lan_ip }}"
+              echo "ROOTFS_PARTSIZE=${{ inputs.rootfs_size }}"
+            } >> "$GITHUB_ENV"
+          else
+            # 打标签触发：用默认参数（两个特性都要、含 Docker）。
+            {
+              echo "WITH_FANCHMWRT=true"
+              echo "WITH_ISTOREOS=true"
+              echo "ENABLE_DOCKER=true"
+              echo "LAN_IP=192.168.1.1"
+              echo "ROOTFS_PARTSIZE=1024"
+            } >> "$GITHUB_ENV"
+          fi
+
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      # ---------------------------------------------------------------------
+      # OpenWrt 全量编译需要约 30GB。runner 根分区初始只有约 14GB 可用，
+      # 不清理会在编到一半时 "No space left on device"。
+      # ---------------------------------------------------------------------
+      - name: 释放磁盘空间
+        run: |
+          echo "=== 清理前 ==="
+          df -h /
+          sudo rm -rf \
+            /usr/share/dotnet \
+            /usr/local/lib/android \
+            /usr/local/share/boost \
+            /opt/ghc \
+            /opt/hostedtoolcache/CodeQL \
+            /usr/share/swift \
+            /usr/local/.ghcup \
+            /opt/az \
+            /usr/lib/jvm || true
+          sudo apt-get clean
+          echo "=== 清理后 ==="
+          df -h /
+
+      - name: 安装编译依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential clang flex bison g++ gawk gettext \
+            git libncurses-dev libssl-dev python3-setuptools \
+            rsync swig unzip zlib1g-dev file wget time patch
+
+      # ---------------------------------------------------------------------
+      # 缓存下载的源码包（openwrt/dl，约 1.5GB）。
+      # 主要不是为了省时间（编译才是大头），而是防止某个上游 tarball
+      # 哪天消失导致构建失败 —— 命中缓存时压根不会去下载。
+      # key 跟着 feeds.conf.append 走：它改了才说明包来源变了。
+      # ---------------------------------------------------------------------
+      - name: 缓存源码包
+        uses: actions/cache@v4
+        with:
+          path: openwrt/dl
+          key: dl-${{ hashFiles('feeds.conf.append') }}
+          restore-keys: |
+            dl-
+
+      # ---------------------------------------------------------------------
+      # 准备阶段：取源码 → feed → 铺特性层 → 生成 .config → 双向断言。
+      # 走的就是仓库里的 build.sh，与本地完全同一条路径。
+      # ---------------------------------------------------------------------
+      - name: 准备（源码 / feed / 特性层 / 配置与断言）
+        env:
+          SKIP_BUILD: '1'
+        run: ./build.sh
+
+      - name: 下载源码包
+        working-directory: openwrt
+        run: make -j"$(nproc)" download || echo "::warning::部分源码下载失败，编译阶段会重试"
+
+      - name: 编译固件
+        working-directory: openwrt
+        run: make -j"$(nproc)" BUILD_LOG=1
+
+      - name: 编译失败时输出日志
+        if: failure()
+        run: |
+          echo "=== 最近修改的构建日志 ==="
+          find openwrt/logs -type f -name '*.txt' -printf '%T@ %p\n' 2>/dev/null \
+            | sort -rn | head -3 | cut -d' ' -f2- \
+            | while read -r f; do
+                echo "----- $f -----"
+                tail -60 "$f"
+              done
+          echo "=== 磁盘占用 ==="
+          df -h /
+
+      # ---------------------------------------------------------------------
+      # 核验产物：编译通过不等于编对了。
+      # ---------------------------------------------------------------------
+      - name: 核验产物
+        run: ./scripts/09-verify.sh
+
+      - name: 汇总产物信息
+        id: summary
+        run: |
+          OUT=openwrt/bin/targets/x86/64
+          MANIFEST=$(ls -1 "$OUT"/*.manifest | head -1)
+          PKGCOUNT=$(wc -l < "$MANIFEST")
+          VERSION=$(cat "$OUT/version.buildinfo" 2>/dev/null || echo unknown)
+
+          # 用 .generated/expectations.env 而不是 inputs ——
+          # 那是脚本真正解析后的值，日志里显示的才是事实。
+          # shellcheck disable=SC1091
+          . .generated/expectations.env
+          [ "$WITH_FANCHMWRT" = "1" ] && FANCHM_TXT="包含" || FANCHM_TXT="不含"
+          [ "$WITH_ISTOREOS" = "1" ] && ISTORE_TXT="包含" || ISTORE_TXT="不含"
+          [ "$ENABLE_DOCKER" = "1" ] && DOCKER_TXT="包含" || DOCKER_TXT="不含"
+          [ -n "$LAN_IP" ] || LAN_IP="192.168.1.1（ImmortalWrt 默认）"
+          LAN_HOST="${LAN_IP%%/*}"
+
+          {
+            echo "pkgcount=$PKGCOUNT"
+            echo "version=$VERSION"
+            echo "lan_ip=$LAN_IP"
+            echo "lan_host=$LAN_HOST"
+            echo "fanchm=$FANCHM_TXT"
+            echo "istore=$ISTORE_TXT"
+            echo "docker=$DOCKER_TXT"
+            echo "theme=$THEME"
+            echo "rootfs=$ROOTFS_PARTSIZE"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### 构建成功"
+            echo ""
+            echo "| 项目 | 值 |"
+            echo "|---|---|"
+            echo "| 底座 | ImmortalWrt 25.12 (x86_64) |"
+            echo "| 版本 | \`$VERSION\` |"
+            echo "| FanchmWrt 特性 | $FANCHM_TXT |"
+            echo "| iStoreOS 特性 | $ISTORE_TXT |"
+            echo "| Docker | $DOCKER_TXT |"
+            echo "| 主题 | $THEME |"
+            echo "| 管理地址 | \`$LAN_IP\` |"
+            echo "| rootfs 分区 | ${ROOTFS_PARTSIZE} MB |"
+            echo "| 已安装软件包 | $PKGCOUNT 个 |"
+            echo "| 产物核验 | 全部通过 |"
+            echo ""
+            echo "**登录**：<http://$LAN_HOST> ｜ 用户 \`root\` ｜ 密码 \`password\`（首次登录请立刻改）"
+            echo ""
+            echo "| 镜像 | 大小 |"
+            echo "|---|---|"
+            for f in "$OUT"/*-squashfs-combined-efi.img.gz \
+                     "$OUT"/*-squashfs-combined.img.gz \
+                     "$OUT"/*-ext4-combined-efi.img.gz \
+                     "$OUT"/*-ext4-combined.img.gz; do
+              [ -e "$f" ] || continue
+              printf '| `%s` | %s |\n' "$(basename "$f")" "$(du -h "$f" | cut -f1)"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # ---------------------------------------------------------------------
+      - name: 上传构建产物
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.upload_artifact }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: immortalwrt-fusion-x86_64
+          path: |
+            openwrt/bin/targets/x86/64/*-squashfs-combined-efi.img.gz
+            openwrt/bin/targets/x86/64/*-squashfs-combined.img.gz
+            openwrt/bin/targets/x86/64/*-ext4-combined-efi.img.gz
+            openwrt/bin/targets/x86/64/*-ext4-combined.img.gz
+            openwrt/bin/targets/x86/64/sha256sums
+          if-no-files-found: error
+          retention-days: 30
+
+      # ---------------------------------------------------------------------
+      # 发布
+      # ---------------------------------------------------------------------
+      - name: 确定 Release 标签
+        id: tag
+        if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.create_release) }}
+        run: |
+          if [ "${GITHUB_EVENT_NAME}" = "push" ]; then
+            TAG="${GITHUB_REF_NAME}"
+          else
+            TAG="${{ inputs.release_tag }}"
+            [ -n "$TAG" ] || TAG="$(date -u +%Y%m%d-%H%M)"
+          fi
+          # 标签会被写进 Release 说明模板并当参数传给 gh，严格限定字符集 ——
+          # 既是防注入，也是挡住非法 git tag。
+          case "$TAG" in
+            *[!A-Za-z0-9._-]*|'')
+              echo "::error::非法的 Release 标签：'$TAG'（只允许字母、数字、点、下划线、连字符）"
+              exit 1
+              ;;
+          esac
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "将使用标签：$TAG"
+
+      - name: 生成 Release 说明
+        if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.create_release) }}
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+          PKGCOUNT: ${{ steps.summary.outputs.pkgcount }}
+          VERSION: ${{ steps.summary.outputs.version }}
+          LAN_IP: ${{ steps.summary.outputs.lan_ip }}
+          LAN_HOST: ${{ steps.summary.outputs.lan_host }}
+          FANCHM: ${{ steps.summary.outputs.fanchm }}
+          ISTORE: ${{ steps.summary.outputs.istore }}
+          DOCKER: ${{ steps.summary.outputs.docker }}
+          THEME: ${{ steps.summary.outputs.theme }}
+          ROOTSIZE: ${{ steps.summary.outputs.rootfs }}
+        run: |
+          # 用 bash 参数展开做模板替换，不用 sed。
+          #
+          # 踩过坑：管理地址形如 192.168.100.1/24，而
+          # sed 's/@LANIP@/192.168.100.1/24/g' 会被替换值里的 / 提前截断，
+          # 报 "unknown option to `s'"，整个发布流程挂掉。除 / 之外，
+          # & 在 sed 替换里表示「匹配到的内容」、反斜杠也要转义，
+          # 这类坑防不胜防。bash 的 ${var//pat/repl} 把替换值当字面量。
+          #
+          # 例外：bash 5.2 起 patsub_replacement 默认开启，会让替换值里的 &
+          # 也展开。当前的值都不含 &，但关掉它零成本。
+          shopt -u patsub_replacement 2>/dev/null || true
+
+          template="$(cat .github/release-notes.md)"
+          template="${template//@TAG@/$TAG}"
+          template="${template//@VERSION@/$VERSION}"
+          template="${template//@PKGCOUNT@/$PKGCOUNT}"
+          template="${template//@LANIP@/$LAN_HOST}"
+          template="${template//@LANIPFULL@/$LAN_IP}"
+          template="${template//@FANCHM@/$FANCHM}"
+          template="${template//@ISTORE@/$ISTORE}"
+          template="${template//@DOCKER@/$DOCKER}"
+          template="${template//@THEME@/$THEME}"
+          # 用 summary 的输出，不用 ${{ inputs.rootfs_size }}：
+          # 打标签触发时 inputs.* 是空的，那样会发出一个写着「0 MB」的说明。
+          template="${template//@ROOTSIZE@/$ROOTSIZE}"
+          template="${template//@DATE@/$(date -u +%Y-%m-%d)}"
+          printf '%s\n' "$template" > /tmp/release-notes.md
+
+          # 兜底自检：模板里有新占位符而这里漏了替换的话，
+          # 宁可在这里失败，也不要发一份带着 @XXX@ 的 Release 出去。
+          if grep -qE '@[A-Z_]+@' /tmp/release-notes.md; then
+            echo "::error::Release 说明里仍有未替换的占位符："
+            grep -oE '@[A-Z_]+@' /tmp/release-notes.md | sort -u
+            exit 1
+          fi
+
+          echo "=== Release 说明预览 ==="
+          head -30 /tmp/release-notes.md
+
+      - name: 创建或更新 Release
+        if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.create_release) }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -e
+          OUT=openwrt/bin/targets/x86/64
+
+          # 只挂 4 个镜像 + 校验和。rootfs.img.gz 是 x86 无条件产出的、
+          # 没有开关可关，这里靠路径精确匹配把它排除在外。
+          ASSETS=$(ls -1 \
+            "$OUT"/*-squashfs-combined-efi.img.gz \
+            "$OUT"/*-squashfs-combined.img.gz \
+            "$OUT"/*-ext4-combined-efi.img.gz \
+            "$OUT"/*-ext4-combined.img.gz \
+            "$OUT"/sha256sums)
+
+          # 发布前兜底：确认恰好是 4 个镜像。镜像类型配置被改坏
+          # （比如 TARGZ 又被打开）时在这里暴露，而不是稀里糊涂发一个
+          # 多出好几个附件的 Release。
+          IMG_COUNT=$(printf '%s\n' $ASSETS | grep -c '\.img\.gz$' || true)
+          if [ "$IMG_COUNT" -ne 4 ]; then
+            echo "::error::期望 4 个镜像，实际找到 $IMG_COUNT 个："
+            printf '%s\n' $ASSETS
+            exit 1
+          fi
+          echo "将发布的附件："
+          printf '  %s\n' $ASSETS
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG 已存在，同步附件"
+            gh release upload "$TAG" $ASSETS --clobber
+            # 删掉不在本次清单里的旧附件，否则重跑同一个标签会把新旧混在一起。
+            gh release view "$TAG" --json assets --jq '.assets[].name' | while read -r name; do
+              [ -n "$name" ] || continue
+              if printf '%s\n' $ASSETS | grep -qxF "$OUT/$name"; then
+                echo "  保留 $name"
+              else
+                echo "  删除过期附件 $name"
+                gh release delete-asset "$TAG" "$name" --yes || true
+              fi
+            done
+            gh release edit "$TAG" --notes-file /tmp/release-notes.md
+          else
+            gh release create "$TAG" \
+              --title "ImmortalWrt 融合固件 $TAG" \
+              --notes-file /tmp/release-notes.md \
+              $ASSETS
+          fi
+          echo "完成：$(gh release view "$TAG" --json url --jq .url)"

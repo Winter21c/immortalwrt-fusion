@@ -1,0 +1,319 @@
+#!/bin/sh
+#
+# 第 4 步：按勾选拼出 .config，跑 defconfig，然后逐项核对。
+#
+# 这里是「可勾选」这件事的收口处。设计上有三条硬规矩：
+#
+#   1. **不用 include/target.mk 的 DEFAULT_PACKAGES，全部走 .config。**
+#      包清单写在配置文件里，勾了哪个层就拼哪个文件，一眼能看出这个固件
+#      是怎么来的。改 target.mk 是隐式的，隔一层看不见。
+#
+#   2. **每个组合都要双向断言。**
+#      只断言「该有的在」是不够的：漏装会报错，但**多装不会**。
+#      你明确说了不要 ddns / hd-idle / wol / smb 界面，那就必须同时断言
+#      「这些东西确实不在」，否则某天上游把它们拖进来，构建照样绿。
+#
+#   3. **断言失败就中止，不出固件。**
+#      一个缺了主题或混进 Samba 界面的固件，比一次失败的构建更浪费时间。
+#
+set -eu
+. "$(dirname "$0")/lib.sh"
+
+SRC="$PROJECT_ROOT/openwrt"
+GEN="$PROJECT_ROOT/.generated"
+[ -d "$SRC" ] || die "没找到 $SRC，请先跑 scripts/01-fetch.sh"
+
+# --- 参数校验 ---------------------------------------------------------------
+case "$ROOTFS_PARTSIZE" in
+	'' | *[!0-9]*) die "固件大小必须是整数（MB），收到：'$ROOTFS_PARTSIZE'" ;;
+esac
+[ "$ROOTFS_PARTSIZE" -ge 128 ] && [ "$ROOTFS_PARTSIZE" -le 8192 ] \
+	|| die "固件大小必须落在 128~8192 MB，收到：$ROOTFS_PARTSIZE"
+
+case "$LAN_IP" in
+	'') : ;;
+	*[!0-9./]*) die "管理地址只允许数字、点、斜杠，收到：'$LAN_IP'" ;;
+esac
+
+mkdir -p "$GEN"
+
+# ---------------------------------------------------------------------------
+# 1. 拼 .config
+# ---------------------------------------------------------------------------
+say "生成 .config（FanchmWrt=$WITH_FANCHMWRT iStoreOS=$WITH_ISTOREOS Docker=$ENABLE_DOCKER）"
+
+{
+	printf '# 由 scripts/04-config.sh 生成 —— 不要手工编辑，下次构建会覆盖。\n'
+	printf '# 本次参数：FanchmWrt=%s iStoreOS=%s Docker=%s LAN=%s rootfs=%sMB\n\n' \
+		"$WITH_FANCHMWRT" "$WITH_ISTOREOS" "$ENABLE_DOCKER" "${LAN_IP:-默认}" "$ROOTFS_PARTSIZE"
+	cat "$PROJECT_ROOT/config/00-target.config"
+	printf '\n# 固件大小：用户在 Actions 里选的，覆盖 00-target.config 里的默认值\n'
+	printf 'CONFIG_TARGET_ROOTFS_PARTSIZE=%s\n\n' "$ROOTFS_PARTSIZE"
+	cat "$PROJECT_ROOT/config/10-base.config"
+
+	if [ "$WITH_FANCHMWRT" = "1" ]; then
+		printf '\n'
+		cat "$PROJECT_ROOT/config/20-fanchmwrt.config"
+	fi
+
+	if [ "$WITH_ISTOREOS" = "1" ]; then
+		printf '\n'
+		if [ "$WITH_FANCHMWRT" = "1" ]; then
+			# 主题规则：勾了 FanchmWrt 就用 FanchmWrt 主题。
+			#
+			# 做法是：先把 iStoreOS 层里那两行 argon 摘掉，再显式关掉它们。
+			# 不是「删干净」，是留下痕迹 —— 看 .config 的人能直接读到这个决定。
+			#
+			# 注意关闭行必须**干干净净**地写 `# CONFIG_X is not set`，
+			# 后面不能跟中文说明：kconfig 是按这个固定串去匹配的，
+			# 多一个尾注就可能整行被当成普通注释忽略掉。
+			# 说明只能另起一行写。
+			grep -v -e '^CONFIG_PACKAGE_luci-theme-argon=' \
+			        -e '^CONFIG_PACKAGE_luci-app-argon-config=' \
+				"$PROJECT_ROOT/config/30-istoreos.config" || true
+			cat <<-'EOF'
+
+				# 勾了 FanchmWrt，主题让位给 luci-theme-fanchmwrt。
+				# 两个主题都装的话，各自的 uci-defaults 都会去抢
+				# luci.main.mediaurlbase，谁后跑谁赢 —— 那种不确定性不该留在固件里。
+				# CONFIG_PACKAGE_luci-theme-argon is not set
+				# CONFIG_PACKAGE_luci-app-argon-config is not set
+			EOF
+		else
+			cat "$PROJECT_ROOT/config/30-istoreos.config"
+		fi
+	fi
+
+	if [ "$ENABLE_DOCKER" = "1" ]; then
+		printf '\n'
+		cat "$PROJECT_ROOT/config/40-docker.config"
+	fi
+} > "$SRC/.config"
+
+cp "$SRC/.config" "$GEN/config.raw"
+
+# ---------------------------------------------------------------------------
+# 2. 生成 build-defaults 要装进固件的文件
+#
+# 三样东西：
+#   /etc/uci-defaults/25_lan_ip            首次启动套用管理地址
+#   /etc/uci-defaults/99_build-defaults-theme  首次启动锁定主题
+#   /etc/build-options                     把本次参数留在设备上，便于排查
+# ---------------------------------------------------------------------------
+BD="$SRC/package/build-defaults/files"
+rm -rf "$BD"
+mkdir -p "$BD/etc/uci-defaults"
+
+if [ -n "$LAN_IP" ]; then
+	# 为什么用 uci-defaults 而不是改 bin/config_generate：
+	# config_generate 是首次启动时才生成 /etc/config/network 的，uci-defaults
+	# 紧随其后、且在 network 服务启动之前执行，所以在这里改既生效又不必去动
+	# base-files 的核心脚本。
+	#
+	# config_generate 把 network.lan.ipaddr 生成成了 list，所以必须先 delete
+	# 再 add_list，否则会同时留下两个地址。
+	cat > "$BD/etc/uci-defaults/25_lan_ip" <<EOF
+#!/bin/sh
+#
+# 由 scripts/04-config.sh 按构建参数生成 —— 不要手工编辑。
+#
+uci -q batch <<-UCIEOF
+	delete network.lan.ipaddr
+	set network.lan.proto='static'
+	add_list network.lan.ipaddr='$LAN_IP'
+	commit network
+UCIEOF
+
+exit 0
+EOF
+	chmod 755 "$BD/etc/uci-defaults/25_lan_ip"
+	say "已生成管理地址 uci-defaults：$LAN_IP"
+fi
+
+# 主题锁定。
+#
+# 主题包自己也会写 uci-defaults（luci-theme-fanchmwrt 是 31_ 开头的），
+# 这里用 99_ 开头，保证后跑、以本次勾选为准。这样「勾什么就得到什么主题」
+# 不依赖上游主题包的默认值是什么 —— 那些默认值随时可能变。
+if [ "$WITH_FANCHMWRT" = "1" ]; then
+	THEME_NAME="FanchmWrt"
+	THEME_PATH="/luci-static/fanchmwrt"
+elif [ "$WITH_ISTOREOS" = "1" ]; then
+	THEME_NAME="Argon"
+	THEME_PATH="/luci-static/argon"
+else
+	THEME_NAME=""
+	THEME_PATH=""
+fi
+
+if [ -n "$THEME_PATH" ]; then
+	cat > "$BD/etc/uci-defaults/99_build-defaults-theme" <<EOF
+#!/bin/sh
+#
+# 由 scripts/04-config.sh 按勾选生成 —— 不要手工编辑。
+#
+# 勾了 FanchmWrt  -> FanchmWrt 主题（仪表盘 + 高级/普通模式都在这个主题里）
+# 只勾 iStoreOS  -> argon 主题 + QuickStart 作首页
+# 都不勾         -> 本文件不存在，保持 ImmortalWrt 原样
+#
+uci -q batch <<-UCIEOF
+	set luci.themes.$THEME_NAME='$THEME_PATH'
+	set luci.main.mediaurlbase='$THEME_PATH'
+	commit luci
+UCIEOF
+
+exit 0
+EOF
+	chmod 755 "$BD/etc/uci-defaults/99_build-defaults-theme"
+	say "已生成主题 uci-defaults：$THEME_NAME ($THEME_PATH)"
+else
+	say "两个特性都没勾：不锁主题，保持 ImmortalWrt 默认"
+fi
+
+cat > "$BD/etc/build-options" <<EOF
+# 本次固件是用什么参数编出来的。
+#
+# 设备上直接 cat 这个文件，比去翻 GitHub Actions 的日志快得多。
+# 由 scripts/04-config.sh 生成，改它没有用，下次构建会覆盖。
+WITH_FANCHMWRT=$WITH_FANCHMWRT
+WITH_ISTOREOS=$WITH_ISTOREOS
+ENABLE_DOCKER=$ENABLE_DOCKER
+LAN_IP=${LAN_IP:-（未指定，保持 ImmortalWrt 默认 192.168.1.1）}
+ROOTFS_PARTSIZE=$ROOTFS_PARTSIZE
+IMMORTALWRT_REF=${IMMORTALWRT_REF:-openwrt-25.12}
+IMMORTALWRT_SHA=$(cat "$SRC/.immortalwrt-sha" 2>/dev/null || echo unknown)
+THEME=${THEME_NAME:-ImmortalWrt 默认}
+EOF
+
+# ---------------------------------------------------------------------------
+# 3. defconfig
+#
+# 删掉 tmp/ 是刻意的：tmp/.packageinfo 之类的元数据记录了「有哪些包」，
+# 切换勾选（比如这次不要 FanchmWrt 了）时它是过期的，defconfig 会据此
+# 算出错的依赖关系。现有项目就踩过这个坑 —— 参数改成不含 Docker，
+# 固件里却仍然有 Docker。重新生成元数据多花一两分钟，换一个确定性。
+# ---------------------------------------------------------------------------
+say "清理过期的构建元数据"
+rm -rf "$SRC/tmp"
+
+cd "$SRC"
+say "make defconfig"
+make defconfig >/dev/null
+
+cp "$SRC/.config" "$GEN/config.final"
+
+# ---------------------------------------------------------------------------
+# 4. 双向断言
+# ---------------------------------------------------------------------------
+MUST_HAVE="luci uhttpd build-defaults"
+MUST_HAVE="$MUST_HAVE mosdns luci-app-mosdns v2ray-geoip v2ray-geosite luci-app-openclash"
+MUST_HAVE="$MUST_HAVE luci-app-ttyd ttyd"
+MUST_HAVE="$MUST_HAVE luci-app-diskman luci-app-nfs nfs-kernel-server"
+MUST_HAVE="$MUST_HAVE luci-app-mergerfs mergerfs luci-app-unishare unishare webdav2 wsdd2"
+# 这两个不是特性层的东西，是底座本来就会带上的：
+#   kmod-nft-fullcone  firewall4 的依赖（提供者在树内 fullconenat-nft）
+#   luci-compat        上面几个旧式 Lua 应用的依赖
+# 放进「永远必须有」的清单，是为了让「没勾 FanchmWrt 时不该有 fwx 相关包」
+# 这条断言保持精确 —— 否则会把它俩误判成 FanchmWrt 层带进来的。
+MUST_HAVE="$MUST_HAVE kmod-nft-fullcone luci-compat"
+MUST_NOT_HAVE="luci-app-ddns luci-app-hd-idle luci-app-wol luci-app-samba4 autosamba"
+
+# --- FanchmWrt 层 ---
+FANCHM_PKGS="kmod-fwx fwxd libfwx_common luci-theme-fanchmwrt"
+FANCHM_PKGS="$FANCHM_PKGS luci-app-fwx-dashboard luci-app-fwx-dashboard-setting"
+FANCHM_PKGS="$FANCHM_PKGS luci-app-fwx-app-center luci-app-fwx-appfilter luci-app-fwx-feature"
+FANCHM_PKGS="$FANCHM_PKGS luci-app-fwx-macfilter luci-app-fwx-mac-blacklist"
+FANCHM_PKGS="$FANCHM_PKGS luci-app-fwx-network luci-app-fwx-wireless"
+FANCHM_PKGS="$FANCHM_PKGS luci-app-fwx-record luci-app-fwx-record-whitelist"
+FANCHM_PKGS="$FANCHM_PKGS luci-app-fwx-resources luci-app-fwx-session-stat"
+FANCHM_PKGS="$FANCHM_PKGS luci-app-fwx-system luci-app-fwx-traffic-stat"
+FANCHM_PKGS="$FANCHM_PKGS luci-app-fwx-user luci-app-fwx-user-record"
+
+# --- iStoreOS 层 ---
+ISTORE_PKGS="luci-app-quickstart quickstart luci-app-store taskd luci-lib-taskd luci-lib-xterm"
+
+# --- Docker 层 ---
+DOCKER_PKGS="luci-app-dockerman dockerd docker docker-compose containerd runc tini docker-defaults"
+
+if [ "$WITH_FANCHMWRT" = "1" ]; then
+	MUST_HAVE="$MUST_HAVE $FANCHM_PKGS"
+	# 主题互斥：勾了 FanchmWrt 就不该再有 argon。
+	MUST_NOT_HAVE="$MUST_NOT_HAVE luci-theme-argon luci-app-argon-config"
+else
+	MUST_NOT_HAVE="$MUST_NOT_HAVE $FANCHM_PKGS"
+fi
+
+if [ "$WITH_ISTOREOS" = "1" ]; then
+	MUST_HAVE="$MUST_HAVE $ISTORE_PKGS"
+	# 只勾 iStoreOS（没勾 FanchmWrt）时，主题必须是 argon。
+	[ "$WITH_FANCHMWRT" = "1" ] || MUST_HAVE="$MUST_HAVE luci-theme-argon"
+else
+	MUST_NOT_HAVE="$MUST_NOT_HAVE $ISTORE_PKGS luci-theme-argon luci-app-argon-config"
+fi
+
+if [ "$ENABLE_DOCKER" = "1" ]; then
+	MUST_HAVE="$MUST_HAVE $DOCKER_PKGS"
+else
+	MUST_NOT_HAVE="$MUST_NOT_HAVE $DOCKER_PKGS"
+fi
+
+FAILED=0
+for pkg in $MUST_HAVE; do
+	if ! assert_pkg_on "$SRC/.config" "$pkg"; then
+		warn "该有却没有：$pkg"
+		FAILED=1
+	fi
+done
+for pkg in $MUST_NOT_HAVE; do
+	if ! assert_pkg_off "$SRC/.config" "$pkg"; then
+		warn "不该有却有：$pkg"
+		FAILED=1
+	fi
+done
+
+if [ "$FAILED" = "1" ]; then
+	printf '\n' >&2
+	die "包清单核对失败，拒绝继续构建。
+     一个缺主题或多带 Samba 界面的固件，比一次失败的构建更浪费时间。
+     排查方向：
+       * 「该有却没有」通常是 feed 没装全，或包名写错（去 openwrt/feeds/ 里找）；
+       * 「不该有却有」通常是某个 meta 包把它拖进来了，用
+         grep -rn '<包名>' openwrt/feeds/*/*/Makefile 查依赖。"
+fi
+
+say "包清单核对通过：$(echo $MUST_HAVE | wc -w) 项必须在位，$(echo $MUST_NOT_HAVE | wc -w) 项确认排除"
+
+# --- 镜像相关配置 -----------------------------------------------------------
+for k in "CONFIG_TARGET_ROOTFS_SQUASHFS=y" "CONFIG_TARGET_ROOTFS_EXT4FS=y" \
+         "CONFIG_TARGET_IMAGES_GZIP=y" "CONFIG_TARGET_x86_64_DEVICE_generic=y"; do
+	grep -qx "$k" "$SRC/.config" || die "目标配置缺失：$k"
+done
+grep -qx "CONFIG_TARGET_ROOTFS_PARTSIZE=$ROOTFS_PARTSIZE" "$SRC/.config" \
+	|| die "固件大小没有生效：期望 CONFIG_TARGET_ROOTFS_PARTSIZE=$ROOTFS_PARTSIZE"
+# 这四个必须是关的，否则镜像数量和 Release 附件都会失控。
+# 末尾的 `|| true` 不能省：它是 for 循环体的最后一句，grep 不匹配时返回 1，
+# 在 set -e 下会把「一切正常」误判成失败。
+for k in "CONFIG_TARGET_ROOTFS_TARGZ" "CONFIG_TARGET_ROOTFS_INITRAMFS" \
+         "CONFIG_TARGET_ROOTFS_CPIOGZ"; do
+	grep -qx "CONFIG_$k=y" "$SRC/.config" && die "$k 本应关闭却开着 —— 会多出好几倍的镜像文件" || true
+done
+say "镜像配置核对通过（4 个镜像：squashfs / ext4 × efi / 非 efi，rootfs ${ROOTFS_PARTSIZE}MB）"
+
+# ---------------------------------------------------------------------------
+# 5. 留一份期望清单给 scripts/09-verify.sh
+#
+# 编译只证明「能编出来」，不证明「编出来的东西对」。产物核验要拿这份清单
+# 去比对固件里真实的软件包列表，那才是最终事实。
+# ---------------------------------------------------------------------------
+{
+	echo "WITH_FANCHMWRT=$WITH_FANCHMWRT"
+	echo "WITH_ISTOREOS=$WITH_ISTOREOS"
+	echo "ENABLE_DOCKER=$ENABLE_DOCKER"
+	echo "LAN_IP=$LAN_IP"
+	echo "ROOTFS_PARTSIZE=$ROOTFS_PARTSIZE"
+	printf 'MUST_HAVE="%s"\n' "$MUST_HAVE"
+	printf 'MUST_NOT_HAVE="%s"\n' "$MUST_NOT_HAVE"
+	printf 'THEME=%s\n' "${THEME_NAME:-immortalwrt-default}"
+} > "$GEN/expectations.env"
+
+say "期望清单已写入 .generated/expectations.env"

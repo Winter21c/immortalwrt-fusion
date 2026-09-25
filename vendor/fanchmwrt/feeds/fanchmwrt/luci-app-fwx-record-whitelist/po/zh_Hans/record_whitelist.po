@@ -1,0 +1,80 @@
+msgid "Record Whitelist"
+msgstr "记录白名单"
+
+msgid "MAC Address"
+msgstr "MAC地址"
+
+msgid "Add"
+msgstr "添加"
+
+msgid "Delete"
+msgstr "删除"
+
+msgid "Operation"
+msgstr "操作"
+
+msgid "No."
+msgstr "序号"
+
+msgid "Hostname"
+msgstr "主机名"
+
+msgid "Nickname"
+msgstr "备注名"
+
+msgid "Loading..."
+msgstr "加载中..."
+
+msgid "No Data"
+msgstr "暂无数据"
+
+msgid "Prev Page"
+msgstr "上一页"
+
+msgid "Next Page"
+msgstr "下一页"
+
+msgid "Total"
+msgstr "共"
+
+msgid "Records"
+msgstr "条"
+
+msgid "Invalid MAC address format"
+msgstr "MAC地址格式无效"
+
+msgid "Add success"
+msgstr "添加成功"
+
+msgid "Add failed"
+msgstr "添加失败"
+
+msgid "Delete success"
+msgstr "删除成功"
+
+msgid "Delete failed"
+msgstr "删除失败"
+
+msgid "Are you sure you want to delete this whitelist entry?"
+msgstr "确认要删除这条白名单吗？"
+
+msgid "Add to Whitelist"
+msgstr "添加到白名单"
+
+msgid "No whitelist entries yet"
+msgstr "暂无白名单记录"
+
+msgid "No available devices to add"
+msgstr "没有可添加的终端"
+
+msgid "Please select at least one device"
+msgstr "请至少选择一个终端"
+
+msgid "Are you sure you want to remove this device from whitelist?"
+msgstr "确认要从白名单移除该终端吗？"
+
+msgid "OK"
+msgstr "确定"
+
+msgid "Cancel"
+msgstr "取消"

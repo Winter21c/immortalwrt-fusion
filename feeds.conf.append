@@ -1,0 +1,42 @@
+# ===========================================================================
+# 追加到 ImmortalWrt 自带 feeds.conf.default 后面的 feed。
+#
+# ⚠️ 本文件里**不允许出现「只有单个 # 的行」**。
+#    scripts/feeds 的解析器是先做 s/#.+$// 再判空，而 `#.+` 要求 # 后面
+#    **至少还有一个字符**。所以光秃秃一个 `#` 不会被当成注释剥掉，
+#    会原样送进语法检查、报 "Syntax error in feeds.conf.default, line N"。
+#    要空行就写真正的空行，要注释就写 `# 内容`。
+#    （scripts/02-feeds.sh 里还有一道过滤兜底。）
+#
+# 设计原则：**能不加就不加。**
+#
+# ImmortalWrt 的 luci 源已经自带这些包：
+#     luci-theme-argon  luci-app-argon-config  luci-app-nfs
+#     luci-app-openclash  luci-app-diskman  luci-app-ttyd  luci-app-samba4
+# ImmortalWrt 的 packages 源已经自带这些包：
+#     dockerd  docker  docker-compose  mosdns  samba4
+#     nfs-kernel-server  wsdd2  v2ray-geodata
+#
+# 所以原本需要的 jjm2473/openwrt-third、vernesong/OpenClash、
+# lisaac/luci-app-diskman 三个第三方 feed **全部砍掉了** ——
+# 它们提供的包与 ImmortalWrt 自带的**同名**，一起装会在 feeds 阶段撞包
+# （同名包只允许存在一个，否则构建系统会报重复包）。
+# 少一个 feed 就少一处会腐烂的外部依赖。
+#
+# 下面这些是 ImmortalWrt 真的没有、又确实要用的。
+# ===========================================================================
+
+# mosdns：只要它的 LuCI 界面 luci-app-mosdns。
+# 这个 feed 同时提供一个也叫 mosdns 的二进制包，与 ImmortalWrt 自带的同名，
+# 会在 feeds 阶段撞包 —— scripts/02-feeds.sh 会删掉 feed 里那一份，
+# 二进制用 ImmortalWrt 自带的（跟着底座走，更好维护）。
+src-git mosdns https://github.com/sbwml/luci-app-mosdns.git;v5
+
+# quickstart 后端（x86_64 预编译二进制）、unishare、webdav2
+src-git nas https://github.com/linkease/nas-packages.git;master
+
+# 对应的 LuCI 界面：luci-app-quickstart、luci-app-unishare 等
+src-git nas_luci https://github.com/linkease/nas-packages-luci.git;main
+
+# mergerfs 与 luci-app-mergerfs（多盘合并成一个存储池）
+src-git istoreapps https://github.com/linkease/openwrt-apps.git;main

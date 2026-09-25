@@ -1,0 +1,34 @@
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+
+msgid "Dashboard Setting"
+msgstr "仪表板配置"
+
+msgid "Configure dashboard monitoring interface"
+msgstr "配置仪表板监控接口"
+
+msgid "Traffic Statistics Interface"
+msgstr "流量统计接口"
+
+msgid "Please select"
+msgstr "请选择"
+
+msgid "Refresh"
+msgstr "刷新"
+
+msgid "Save"
+msgstr "保存"
+
+msgid "Saved successfully"
+msgstr "保存成功"
+
+msgid "Save failed"
+msgstr "保存失败"
+
+msgid "Loading..."
+msgstr "加载中..."
+
+msgid "Load failed"
+msgstr "加载失败"
+
