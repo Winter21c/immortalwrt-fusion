@@ -134,9 +134,44 @@ uci-defaults 去设 `luci.main.mediaurlbase`；argon 那边也有类似的脚本
 `luci-app-mosdns`，而 ImmortalWrt 的 packages 源已经有一个 `net/mosdns`。
 同名包只允许存在一个。
 
-**修法**：当时是在 `scripts/02-feeds.sh` 里点名删掉 feed 里那份
-`mosdns/`，二进制用 ImmortalWrt 自带的（5.3.3，跟着底座走），
-界面用 sbwml 的（ImmortalWrt 没有 mosdns 的 LuCI 应用）。
+**第一次修法是错的**，值得记下来。
+
+当时的判断是「二进制跟随底座（ImmortalWrt 的 5.3.3），界面用 sbwml 的」——
+听起来很符合「能跟随底座的就跟随底座」这条原则。于是删掉了 sbwml feed 里
+那份 `mosdns/`，只留界面。
+
+`.config` 断言全过，编译也全过（两边都编得出来）。**但 `package/install`
+阶段炸了：**
+
+```
+ERROR: luci-app-mosdns-1.7.14-r1: trying to overwrite
+       etc/init.d/mosdns owned by mosdns-5.3.3-r1.
+```
+
+原因：sbwml 的 `luci-app-mosdns` **自带** `/etc/init.d/mosdns`，
+而 ImmortalWrt 的 `mosdns` 包也装同一个文件。二进制与界面必须来自同一家。
+
+更坑的是这个错的表现形式：`make -j` 并行时它被淹没在几千行输出里，
+控制台日志的最后只有一句
+`make -r world: build failed. Please re-run make with -j1 V=s`，
+真正的错误要去 `-j1 V=s` 重跑一遍才看得到 —— 又是一轮几十分钟。
+
+**最终修法**：`mosdns` 与 `luci-app-mosdns` **成对**取自 sbwml
+（5.3.4 + 1.7.14，同一维护者一起维护的配套版本），底座那份 `net/mosdns`
+让位。这是本仓库里**唯一一条「第三方顶掉底座」的例外**。
+
+实现上有两个必须注意的顺序问题：
+
+1. **删底座那份要在构造 `BASE_LIST` 之前。** 通用剪枝规则是「第三方与底座
+   重名的就删第三方的」；如果底座的 `net/mosdns` 还在 `BASE_LIST` 里，
+   sbwml 那份紧接着就会被剪掉，结果两边都没了。
+2. **必须重建 `packages` feed 的索引。** `feeds install` 照索引装，
+   不现扫目录；漏了这一步，底座的 mosdns 会照旧索引被装回来，
+   撞文件问题原样复现。
+
+这条教训是：**「跟随底座」是默认策略，不是教条。** 当第三方包与底座包在
+**文件层面**耦合（同一个 init 脚本、同一份配置）时，混搭就是错的 ——
+而这种错在配置与编译阶段都看不出来。
 
 顺带砍掉了三个原本计划要用的第三方 feed：
 

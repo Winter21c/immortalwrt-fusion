@@ -55,22 +55,47 @@ else
 	./scripts/feeds update -a
 fi
 
-# --- 3. 剪掉与底座撞名的第三方包 -------------------------------------------
+# --- 3a. 例外：mosdns 反过来，由第三方 feed 提供 ---------------------------
 #
-# **第三方 feed 里的包不允许顶掉底座。**
+# 上面那条「第三方让位给底座」的规则有一条例外，而且必须写成例外而不是
+# 靠通用规则碰运气 —— 因为这里**二进制与界面必须来自同一家**：
+#
+#   sbwml 的 luci-app-mosdns 包自带 /etc/init.d/mosdns，
+#   而 ImmortalWrt 的 mosdns 包也装同一个文件。
+#   一个用底座的二进制 + 第三方的界面，apk 安装时会直接报：
+#       ERROR: luci-app-mosdns-1.7.14-r1: trying to overwrite
+#              etc/init.d/mosdns owned by mosdns-5.3.3-r1.
+#
+# 这个错在编译阶段看不出来（两边都编得过），只在 package/install 阶段炸，
+# 而且 -j 并行时错误会被淹没，要 -j1 V=s 重跑才看得到 —— 很费时间。
+#
+# 所以：mosdns 与 luci-app-mosdns **成对**取自 sbwml（5.3.4 + 1.7.14，
+# 同一维护者一起维护的配套版本），底座那份 net/mosdns 让位。
+#
+# 实现顺序很关键：必须在构造 BASE_LIST **之前**删掉底座那份，
+# 否则 mosdns 会进 BASE_LIST，紧接着的通用剪枝又把 sbwml 那份剪掉，
+# 结果两边都没了。
+say "mosdns：改为采用 sbwml 的配套版本（二进制 + 界面成对）"
+# PRUNED_ANY 在这里就要初始化：3a 的改动同样需要重建索引，
+# 不能等 3b 的循环去初始化它。
+PRUNED_ANY=0
+if [ -d feeds/packages/net/mosdns ]; then
+	rm -rf feeds/packages/net/mosdns
+	PRUNED_ANY=1
+	say "  已让位：feeds/packages/net/mosdns（底座的 5.3.3）"
+fi
+
+# --- 3b. 剪掉与底座撞名的第三方包 -------------------------------------------
+#
+# **除 mosdns 外，第三方 feed 里的包不允许顶掉底座。**
 #
 # 两个原因：
 #   * 底座（ImmortalWrt 自带的 5 个 feed + 树内 package/）里的版本，是与
-#     它自己的构建系统、内核、LuCI 配套的；第三方那份是给别的底座准备的，
-#     拿过来顶掉只会引入难以定位的问题。
+#     它自己的构建系统、内核、LuCI 配套的；第三方那份是给别的底座准备的。
 #   * 同名包只允许存在一个，两边都在会让构建系统报重复包。
 #
-# 已知的两个具体例子：
-#   * sbwml/luci-app-mosdns 同时提供二进制 mosdns 与界面 luci-app-mosdns，
-#     而底座已有 net/mosdns —— 二进制用底座的（跟着底座走、更好维护），
-#     界面用 sbwml 的（底座没有 mosdns 的 LuCI 应用）。
-#   * linkease/openwrt-apps 里有 luci-app-cpufreq，底座 package/emortal
-#     与 feeds/luci 里各有一份，三处重名。
+# 已知的具体例子：linkease/openwrt-apps 里有 luci-app-cpufreq，底座
+# package/emortal 与 feeds/luci 里各有一份，三处重名。
 #
 # 规则写成通用的而不是逐个点名：上游哪天新增了重名包，也是自动让位给底座，
 # 而不是在 defconfig 阶段以很难懂的形式炸掉。
@@ -86,7 +111,7 @@ BASE_LIST=$(mktemp)
 		-printf '%h\n' 2>/dev/null | xargs -r -n1 basename
 } | sort -u > "$BASE_LIST"
 
-PRUNED_ANY=0
+# PRUNED_ANY 已在 3a 初始化
 for f in mosdns nas nas_luci istoreapps istore; do
 	[ -d "feeds/$f" ] || continue
 	# 先收集再处理：find 一边删一边遍历同一个目录树不可靠。
@@ -110,28 +135,32 @@ rm -f "$BASE_LIST"
 # 剪掉源目录之后，这些链接就成了断链，而断链会在构建系统扫 package/ 时
 # 以 "No such file or directory" 的形式报出来，指向一个看起来存在、
 # 实际打不开的路径。只在重复运行时才会出现，最难查。
-for f in mosdns nas nas_luci istoreapps istore; do
+for f in packages mosdns nas nas_luci istoreapps istore; do
 	[ -d "package/feeds/$f" ] || continue
 	for link in "package/feeds/$f"/*; do
 		[ -e "$link" ] || { rm -rf "$link"; printf '  清掉断链 %s\n' "$link"; }
 	done
 done
 
-# 剪完之后**必须重建这几个 feed 的索引**。
+# 剪完之后**必须重建被改动 feed 的索引**。
 #
-# feeds install 是照 feeds/<name>.index 装的，不是现扫目录。索引还是剪枝前
-# 生成的那一份，install 就会去装已经被删掉的路径 —— 报错信息会指向一个
-# 根本不存在的目录，很难联想到是「索引没更新」。
+# feeds install 是照 feeds/<name>.index 装的，不是现扫目录。索引还是改动前
+# 生成的那一份，install 就会去装已经被删掉的路径 —— 报错信息指向一个根本
+# 不存在的目录，很难联想到是「索引没更新」。
 #
 # `-i` 是「只重建索引、不拉 git」，正合适；顺带把 .tmp 清掉，
 # 避免残留的逐包信息混进新索引。
+#
+# ⚠️ packages 也要重建：3a 从它里面删掉了 net/mosdns。
+#    漏了的话 feeds install 会照旧索引去装一个已删除的 mosdns，
+#    结果是断链，或者更糟 —— 底座的 mosdns 又回来了，撞文件问题照旧。
 if [ "$PRUNED_ANY" = "1" ]; then
-	for f in mosdns nas nas_luci istoreapps istore; do
+	for f in packages mosdns nas nas_luci istoreapps istore; do
 		[ -d "feeds/$f" ] || continue
 		rm -rf "feeds/$f.tmp" "feeds/$f.index" "feeds/$f.targetindex"
 	done
-	say "重建被剪枝 feed 的索引"
-	./scripts/feeds update -i mosdns nas nas_luci istoreapps istore
+	say "重建被改动 feed 的索引"
+	./scripts/feeds update -i packages mosdns nas nas_luci istoreapps istore
 fi
 
 say "feeds install -a"

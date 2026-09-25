@@ -26,10 +26,13 @@
 # 下面这些是 ImmortalWrt 真的没有、又确实要用的。
 # ===========================================================================
 
-# mosdns：只要它的 LuCI 界面 luci-app-mosdns。
-# 这个 feed 同时提供一个也叫 mosdns 的二进制包，与 ImmortalWrt 自带的同名，
-# 会在 feeds 阶段撞包 —— scripts/02-feeds.sh 会删掉 feed 里那一份，
-# 二进制用 ImmortalWrt 自带的（跟着底座走，更好维护）。
+# mosdns：二进制与界面**成对**取用（mosdns 5.3.4 + luci-app-mosdns 1.7.14）。
+#
+# 这个 feed 提供的 mosdns 与 ImmortalWrt 自带的 net/mosdns 同名，而
+# luci-app-mosdns 自带 /etc/init.d/mosdns —— 与底座那份装同一个文件，
+# 混着用会在 apk 安装阶段报 "trying to overwrite"。
+# 所以 scripts/02-feeds.sh 反过来让底座那份 net/mosdns 让位（本仓库唯一
+# 一条「第三方顶掉底座」的例外）。
 src-git mosdns https://github.com/sbwml/luci-app-mosdns.git;v5
 
 # quickstart 后端（x86_64 预编译二进制）、unishare、webdav2
