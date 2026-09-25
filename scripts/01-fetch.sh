@@ -9,7 +9,16 @@
 #     --retry 与 -C - 可以续传断点，在这种大仓库 + 弱网下稳得多。
 #
 set -eu
-. "$(dirname "$0")/lib.sh"
+# 自己推导项目根，不依赖调用方 export。
+#
+# 这些脚本都能单独运行（CI 就是把 09-verify.sh 拆成一个独立 step 调的），
+# 而 build.sh 里那句 export 只在经过它时才有效。漏了这两行的后果是
+#     ./scripts/09-verify.sh: PROJECT_ROOT: parameter not set
+# —— 编译全过、核验步骤直接挂掉。
+PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+export PROJECT_ROOT
+
+. "$PROJECT_ROOT/scripts/lib.sh"
 
 # 直接跑本脚本时也要能拿到 ref（build.sh 会先 export，但单跑不会）
 load_upstreams

@@ -10,7 +10,16 @@
 # 都是在这一步才会暴露。
 #
 set -eu
-. "$(dirname "$0")/lib.sh"
+# 自己推导项目根，不依赖调用方 export。
+#
+# 这些脚本都能单独运行（CI 就是把 09-verify.sh 拆成一个独立 step 调的），
+# 而 build.sh 里那句 export 只在经过它时才有效。漏了这两行的后果是
+#     ./scripts/09-verify.sh: PROJECT_ROOT: parameter not set
+# —— 编译全过、核验步骤直接挂掉。
+PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+export PROJECT_ROOT
+
+. "$PROJECT_ROOT/scripts/lib.sh"
 
 SRC="$PROJECT_ROOT/openwrt"
 GEN="$PROJECT_ROOT/.generated"
@@ -89,6 +98,45 @@ for pkg in $MUST_NOT_HAVE; do
 		unwanted=$((unwanted + 1))
 	fi
 done
+
+# ---------------------------------------------------------------------------
+# 3b. 期望清单是不是过期的？
+#
+# 本地很容易踩：先跑 build.sh 编了一个组合，之后跑 check-all-combos.sh ——
+# 那会把 .generated/expectations.env 覆盖成**最后一个组合**的，而产物还是
+# 原来那份。再跑核验就会拿错清单去比对，报出一长串「不该有却有」，
+# 看起来像构建错了，其实是清单过期。
+#
+# 判据刻意做成**单向**的：只看「标志为关、产物里却有对应的代表包」。
+# 反过来（标志为开、产物里却没有）仍然是真正的失败，照常报错 ——
+# 不能因为怀疑清单过期就放过真问题。
+# ---------------------------------------------------------------------------
+STALE_HINTS=0
+if [ "$WITH_FANCHMWRT" = "0" ] && printf '%s\n' "$PKGS" | grep -qx "kmod-fwx"; then
+	STALE_HINTS=$((STALE_HINTS + 1))
+fi
+if [ "$WITH_ISTOREOS" = "0" ] && printf '%s\n' "$PKGS" | grep -qx "luci-app-quickstart"; then
+	STALE_HINTS=$((STALE_HINTS + 1))
+fi
+if [ "$ENABLE_DOCKER" = "0" ] && printf '%s\n' "$PKGS" | grep -qx "dockerd"; then
+	STALE_HINTS=$((STALE_HINTS + 1))
+fi
+
+if [ "$STALE_HINTS" -ge 2 ]; then
+	printf '\n' >&2
+	warn "════════════════════════════════════════════════════════════"
+	warn "两个以上「没勾选、产物里却有」的迹象，**期望清单多半是过期的**："
+	warn "  .generated/expectations.env 记录的参数是："
+	warn "    FanchmWrt=$WITH_FANCHMWRT  iStoreOS=$WITH_ISTOREOS  Docker=$ENABLE_DOCKER"
+	warn "  而产物里同时存在多个未勾选特性的包。"
+	warn ""
+	warn "本地最常见的原因：编完之后又跑了 check-all-combos.sh，"
+	warn "它会把 expectations.env 覆盖成最后一个组合的。"
+	warn ""
+	warn "确认清单与产物是同一个组合，或干脆重跑一次完整构建："
+	warn "    WITH_FANCHMWRT=... WITH_ISTOREOS=... ENABLE_DOCKER=... ./build.sh"
+	warn "════════════════════════════════════════════════════════════"
+fi
 
 # ---------------------------------------------------------------------------
 # 4. 主题与首页
