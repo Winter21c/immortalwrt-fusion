@@ -30,6 +30,7 @@
 #   WITH_FANCHMWRT  1/0  是否并入 FanchmWrt 特性（fwx 内核模块 + 主题 + 17 个应用）
 #   WITH_ISTOREOS   1/0  是否并入 iStoreOS 特性（QuickStart 首页 + iStore 商店 + argon 主题）
 #   ENABLE_DOCKER   1/0  是否包含 Docker
+#   TARGET          字符串 x86_64 | rockchip-armv8
 #   LAN_IP          字符串 管理地址，可带前缀长度；空 = 保持 ImmortalWrt 默认
 #   ROOTFS_PARTSIZE 数字  rootfs 分区大小（MB）
 #   IMMORTALWRT_REF 字符串 ImmortalWrt 的 ref（分支或 tag）
@@ -67,6 +68,10 @@ ENABLE_DOCKER=$(normalize_bool "${ENABLE_DOCKER:-1}" 1)
 SKIP_BUILD=$(normalize_bool "${SKIP_BUILD:-0}" 0)
 SKIP_FEEDS_UPDATE=$(normalize_bool "${SKIP_FEEDS_UPDATE:-0}" 0)
 
+# 目标平台与特性是**正交**的两件事：目标决定设备层（设备树 / U-Boot / board.d），
+# 特性决定包选集。任意目标 × 任意特性组合都成立，所以这里不去约束二者。
+TARGET=$(normalize_target "${TARGET:-x86_64}")
+
 LAN_IP="${LAN_IP:-192.168.1.1}"
 ROOTFS_PARTSIZE="${ROOTFS_PARTSIZE:-1024}"
 
@@ -76,7 +81,7 @@ ROOTFS_PARTSIZE="${ROOTFS_PARTSIZE:-1024}"
 load_upstreams
 
 export WITH_FANCHMWRT WITH_ISTOREOS ENABLE_DOCKER SKIP_FEEDS_UPDATE
-export LAN_IP ROOTFS_PARTSIZE IMMORTALWRT_REF
+export LAN_IP ROOTFS_PARTSIZE IMMORTALWRT_REF TARGET
 
 # 慢镜像保护。
 #
@@ -98,6 +103,7 @@ fi
 
 printf '\n'
 say "immortalwrt-fusion"
+printf '    目标平台  : %s（%s）\n' "$TARGET" "$(target_human "$TARGET")"
 printf '    风味      : %s\n' "$FLAVOR"
 printf '    管理地址  : %s\n' "$LAN_IP"
 printf '    rootfs    : %s MB\n' "$ROOTFS_PARTSIZE"
@@ -116,6 +122,11 @@ sh "$PROJECT_ROOT/scripts/02-feeds.sh"
 
 # --- 3. 特性层 --------------------------------------------------------------
 sh "$PROJECT_ROOT/scripts/03-overlay.sh"
+
+# --- 3b. 目标层 -------------------------------------------------------------
+# 放在特性层之后、配置之前：它要改的 armv8.mk / board.d / U-Boot Makefile
+# 都要在 make defconfig 之前就位，否则设备在 menuconfig 里根本不存在。
+sh "$PROJECT_ROOT/scripts/03-target.sh"
 
 # --- 4. 配置与断言 ----------------------------------------------------------
 sh "$PROJECT_ROOT/scripts/04-config.sh"
@@ -167,4 +178,4 @@ make -j"$JOBS" BUILD_LOG=1
 cd "$PROJECT_ROOT"
 sh "$PROJECT_ROOT/scripts/09-verify.sh"
 
-say "完成。镜像在 openwrt/bin/targets/x86/64/"
+say "完成。镜像在 openwrt/$(target_outdir "$TARGET")/"

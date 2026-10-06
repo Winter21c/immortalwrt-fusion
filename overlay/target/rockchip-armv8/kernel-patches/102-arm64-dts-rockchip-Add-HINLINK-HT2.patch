@@ -1,0 +1,369 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Winter21c <winter21c@users.noreply.github.com>
+Date: Mon, 6 Oct 2025 12:00:00 +0800
+Subject: [PATCH] arm64: dts: rockchip: Add HINLINK HT2
+
+The HINLINK HT2 is a TV-box style router board based on the
+Rockchip RK3528 SoC. It is a close relative of the HINLINK H28K,
+but differs in the amount of networking and in the onboard WiFi:
+
+- 1x 1GbE RTL8211F Ethernet
+- 1/2/4GB LPDDR4
+- 8/32/64GB eMMC
+- MicroSD card slot
+- SDIO WiFi (AMPAK AP6275S, or AIC8800 on some batches)
+- 1x USB 2.0, 1x USB 3.0
+- 1x HDMI
+
+Signed-off-by: Winter21c <winter21c@users.noreply.github.com>
+---
+ arch/arm64/boot/dts/rockchip/Makefile         |   1 +
+ .../boot/dts/rockchip/rk3528-hinlink-ht2.dts  | 332 +++++++++++
+ 2 files changed, 333 insertions(+)
+ create mode 100644 arch/arm64/boot/dts/rockchip/rk3528-hinlink-ht2.dts
+
+--- a/arch/arm64/boot/dts/rockchip/Makefile
++++ b/arch/arm64/boot/dts/rockchip/Makefile
+@@ -80,6 +80,7 @@ dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3528-radxa-e20c.dtb
+ dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3528-radxa-e20c.dtb
++dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3528-hinlink-ht2.dtb
+ dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3528-rock-2a.dtb
+ dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3528-rock-2f.dtb
+ dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3566-anbernic-rg-arc-d.dtb
+ dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3566-anbernic-rg-arc-s.dtb
+ dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3566-anbernic-rg353p.dtb
+--- /dev/null
++++ b/arch/arm64/boot/dts/rockchip/rk3528-hinlink-ht2.dts
+@@ -0,0 +1,332 @@
++// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
++
++/dts-v1/;
++
++#include <dt-bindings/input/input.h>
++#include <dt-bindings/leds/common.h>
++#include <dt-bindings/pwm/pwm.h>
++#include "rk3528.dtsi"
++
++/ {
++	model = "HINLINK HT2";
++	compatible = "hinlink,ht2", "rockchip,rk3528";
++
++	aliases {
++		ethernet0 = &gmac1;
++		mmc0 = &sdhci;
++		mmc1 = &sdmmc;
++		serial0 = &uart0;
++	};
++
++	chosen {
++		stdout-path = "serial0:1500000n8";
++	};
++
++	leds {
++		compatible = "gpio-leds";
++		pinctrl-names = "default";
++		pinctrl-0 = <&work_led>, <&wlan_led>;
++
++		led-0 {
++			color = <LED_COLOR_ID_GREEN>;
++			function = LED_FUNCTION_STATUS;
++			gpios = <&gpio4 RK_PB7 GPIO_ACTIVE_LOW>;
++			linux,default-trigger = "heartbeat";
++		};
++
++		led-1 {
++			color = <LED_COLOR_ID_BLUE>;
++			function = LED_FUNCTION_WLAN;
++			gpios = <&gpio4 RK_PC0 GPIO_ACTIVE_LOW>;
++			linux,default-trigger = "default-on";
++		};
++	};
++
++	sdio_pwrseq: sdio-pwrseq {
++		compatible = "mmc-pwrseq-simple";
++		pinctrl-names = "default";
++		pinctrl-0 = <&wifi_reg_on_h>;
++		reset-gpios = <&gpio1 RK_PA6 GPIO_ACTIVE_LOW>;
++	};
++
++	vcc_1v8: regulator-1v8-vcc {
++		compatible = "regulator-fixed";
++		regulator-name = "vcc_1v8";
++		regulator-always-on;
++		regulator-boot-on;
++		regulator-min-microvolt = <1800000>;
++		regulator-max-microvolt = <1800000>;
++		vin-supply = <&vcc_3v3>;
++	};
++
++	vcc_3v3: regulator-3v3-vcc {
++		compatible = "regulator-fixed";
++		regulator-name = "vcc_3v3";
++		regulator-always-on;
++		regulator-boot-on;
++		regulator-min-microvolt = <3300000>;
++		regulator-max-microvolt = <3300000>;
++		vin-supply = <&vcc5v0_sys>;
++	};
++
++	vcc5v0_sys: regulator-5v0-vcc-sys {
++		compatible = "regulator-fixed";
++		regulator-name = "vcc5v0_sys";
++		regulator-always-on;
++		regulator-boot-on;
++		regulator-min-microvolt = <5000000>;
++		regulator-max-microvolt = <5000000>;
++	};
++
++	vcc_ddr: regulator-1v1-vcc-ddr {
++		compatible = "regulator-fixed";
++		regulator-name = "vcc_ddr";
++		regulator-always-on;
++		regulator-boot-on;
++		regulator-min-microvolt = <1100000>;
++		regulator-max-microvolt = <1100000>;
++		vin-supply = <&vcc5v0_sys>;
++	};
++
++	vdd_0v9: regulator-0v9-vdd {
++		compatible = "regulator-fixed";
++		regulator-name = "vdd_0v9";
++		regulator-always-on;
++		regulator-boot-on;
++		regulator-min-microvolt = <900000>;
++		regulator-max-microvolt = <900000>;
++		vin-supply = <&vcc5v0_sys>;
++	};
++
++	vcc3v3_sd: regulator-3v3-vcc-sd {
++		compatible = "regulator-fixed";
++		gpios = <&gpio4 RK_PA1 GPIO_ACTIVE_LOW>;
++		pinctrl-names = "default";
++		pinctrl-0 = <&sdmmc_pwren_l>;
++		regulator-name = "vcc3v3_sd";
++		regulator-min-microvolt = <3300000>;
++		regulator-max-microvolt = <3300000>;
++		vin-supply = <&vcc_3v3>;
++	};
++
++	vccio_sd: regulator-vccio-sd {
++		compatible = "regulator-gpio";
++		gpios = <&gpio4 RK_PB6 GPIO_ACTIVE_HIGH>;
++		pinctrl-names = "default";
++		pinctrl-0 = <&sdmmc_vol_ctrl_h>;
++		regulator-name = "vccio_sd";
++		regulator-min-microvolt = <1800000>;
++		regulator-max-microvolt = <3300000>;
++		states = <1800000 0x0>, <3300000 0x1>;
++		vin-supply = <&vcc5v0_sys>;
++	};
++
++	vdd_arm: regulator-vdd-arm {
++		compatible = "pwm-regulator";
++		pwms = <&pwm1 0 5000 PWM_POLARITY_INVERTED>;
++		pwm-supply = <&vcc5v0_sys>;
++		regulator-name = "vdd_arm";
++		regulator-always-on;
++		regulator-boot-on;
++		regulator-min-microvolt = <746000>;
++		regulator-max-microvolt = <1201000>;
++		regulator-settling-time-up-us = <250>;
++	};
++
++	vdd_logic: regulator-vdd-logic {
++		compatible = "pwm-regulator";
++		pwms = <&pwm2 0 5000 PWM_POLARITY_INVERTED>;
++		pwm-supply = <&vcc5v0_sys>;
++		regulator-name = "vdd_logic";
++		regulator-always-on;
++		regulator-boot-on;
++		regulator-min-microvolt = <705000>;
++		regulator-max-microvolt = <1006000>;
++		regulator-settling-time-up-us = <250>;
++	};
++
++	vdd_gpu: regulator-vdd-gpu {
++		compatible = "pwm-regulator";
++		pwms = <&pwm0 0 5000 PWM_POLARITY_INVERTED>;
++		pwm-supply = <&vcc5v0_sys>;
++		regulator-name = "vdd_gpu";
++		regulator-always-on;
++		regulator-boot-on;
++		regulator-min-microvolt = <705000>;
++		regulator-max-microvolt = <1148000>;
++		regulator-settling-time-up-us = <250>;
++	};
++};
++
++&combphy {
++	status = "okay";
++};
++
++&cpu0 {
++	cpu-supply = <&vdd_arm>;
++};
++
++&cpu1 {
++	cpu-supply = <&vdd_arm>;
++};
++
++&cpu2 {
++	cpu-supply = <&vdd_arm>;
++};
++
++&cpu3 {
++	cpu-supply = <&vdd_arm>;
++};
++
++&gmac1 {
++	clock_in_out = "output";
++	phy-handle = <&rgmii_phy>;
++	phy-mode = "rgmii-id";
++	phy-supply = <&vcc_3v3>;
++	pinctrl-names = "default";
++	pinctrl-0 = <&rgmii_miim>,
++		    <&rgmii_tx_bus2>,
++		    <&rgmii_rx_bus2>,
++		    <&rgmii_rgmii_clk>,
++		    <&rgmii_rgmii_bus>;
++	status = "okay";
++};
++
++&gpu {
++	mali-supply = <&vdd_gpu>;
++	status = "okay";
++};
++
++&mdio1 {
++	rgmii_phy: ethernet-phy@1 {
++		compatible = "ethernet-phy-ieee802.3-c22";
++		reg = <0x1>;
++		pinctrl-names = "default";
++		pinctrl-0 = <&gmac1_rstn_l>;
++		reset-assert-us = <20000>;
++		reset-deassert-us = <100000>;
++		reset-gpios = <&gpio4 RK_PC2 GPIO_ACTIVE_LOW>;
++	};
++};
++
++&pinctrl {
++	gmac {
++		gmac1_rstn_l: gmac1-rstn-l {
++			rockchip,pins = <4 RK_PC2 RK_FUNC_GPIO &pcfg_pull_none>;
++		};
++	};
++
++	leds {
++		work_led: work-led {
++			rockchip,pins = <4 RK_PB7 RK_FUNC_GPIO &pcfg_pull_none>;
++		};
++
++		wlan_led: wlan-led {
++			rockchip,pins = <4 RK_PC0 RK_FUNC_GPIO &pcfg_pull_none>;
++		};
++	};
++
++	sdio-pwrseq {
++		wifi_reg_on_h: wifi-reg-on-h {
++			rockchip,pins = <1 RK_PA6 RK_FUNC_GPIO &pcfg_pull_none>;
++		};
++	};
++
++	sdmmc {
++		sdmmc_pwren_l: sdmmc-pwren-l {
++			rockchip,pins = <4 RK_PA1 RK_FUNC_GPIO &pcfg_pull_none>;
++		};
++
++		sdmmc_vol_ctrl_h: sdmmc-vol-ctrl-h {
++			rockchip,pins = <4 RK_PB6 RK_FUNC_GPIO &pcfg_pull_none>;
++		};
++	};
++};
++
++&pwm0 {
++	pinctrl-names = "default";
++	pinctrl-0 = <&pwm0m0_pins>;
++	status = "okay";
++};
++
++&pwm1 {
++	pinctrl-names = "default";
++	pinctrl-0 = <&pwm1m0_pins>;
++	status = "okay";
++};
++
++&pwm2 {
++	pinctrl-names = "default";
++	pinctrl-0 = <&pwm2m0_pins>;
++	status = "okay";
++};
++
++&saradc {
++	vref-supply = <&vcc_1v8>;
++	status = "okay";
++};
++
++&sdhci {
++	bus-width = <8>;
++	cap-mmc-highspeed;
++	mmc-hs200-1_8v;
++	no-sd;
++	no-sdio;
++	non-removable;
++	vmmc-supply = <&vcc_3v3>;
++	vqmmc-supply = <&vcc_1v8>;
++	status = "okay";
++};
++
++&sdio0 {
++	bus-width = <4>;
++	cap-sd-highspeed;
++	cap-sdio-irq;
++	disable-wp;
++	keep-power-in-suspend;
++	max-frequency = <150000000>;
++	mmc-pwrseq = <&sdio_pwrseq>;
++	no-mmc;
++	no-sd;
++	non-removable;
++	sd-uhs-sdr104;
++	status = "okay";
++};
++
++&sdmmc {
++	bus-width = <4>;
++	cap-sd-highspeed;
++	disable-wp;
++	sd-uhs-sdr104;
++	vmmc-supply = <&vcc3v3_sd>;
++	vqmmc-supply = <&vccio_sd>;
++	status = "okay";
++};
++
++&uart0 {
++	pinctrl-names = "default";
++	pinctrl-0 = <&uart0m0_xfer>;
++	status = "okay";
++};
++
++&usb2phy {
++	status = "okay";
++};
++
++&usb2phy_host {
++	phy-supply = <&vcc5v0_sys>;
++	status = "okay";
++};
++
++&usb_host0_ehci {
++	status = "okay";
++};
++
++&usb_host0_ohci {
++	status = "okay";
++};
++
++&usb_host0_xhci {
++	dr_mode = "host";
++	status = "okay";
++};

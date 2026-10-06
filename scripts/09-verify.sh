@@ -23,7 +23,7 @@ export PROJECT_ROOT
 
 SRC="$PROJECT_ROOT/openwrt"
 GEN="$PROJECT_ROOT/.generated"
-OUT="$SRC/bin/targets/x86/64"
+OUT="$SRC/$(target_outdir "$TARGET")"
 
 [ -d "$OUT" ] || die "没找到产物目录：$OUT"
 [ -f "$GEN/expectations.env" ] || die "没找到期望清单，请先跑 scripts/04-config.sh"
@@ -34,23 +34,73 @@ FAILED=0
 note_fail() { warn "$*"; FAILED=1; }
 
 # ---------------------------------------------------------------------------
-# 1. 四个镜像，一个不多一个不少
+# 1. 镜像清单
+#
+# 两个目标的产物形态**完全不同**，所以期望的镜像名不能共用一份：
+#
+#   x86_64          4 个：squashfs / ext4 各含 efi 与非 efi。
+#                   TARGZ / INITRAMFS / CPIOGZ / ISO 在 00-target.config 里
+#                   显式关掉了，出现就是配置没生效。
+#   rockchip-armv8  1 个：<设备>-sysupgrade.img.gz。
+#                   它是一个 GPT（boot + rootfs），u-boot 写在前面 32768 扇区里
+#                   —— 没有 efi / 非 efi 之分，也没有单独的 rootfs 镜像。
+#                   这个形态由 target/linux/rockchip/image/Makefile 的
+#                   IMAGE/sysupgrade.img.gz 决定，不归 .config 管。
 # ---------------------------------------------------------------------------
-say "核对镜像"
+say "核对镜像（目标：$TARGET）"
 IMAGES=""
-for pat in '*-squashfs-combined-efi.img.gz' '*-squashfs-combined.img.gz' \
-           '*-ext4-combined-efi.img.gz' '*-ext4-combined.img.gz'; do
-	# shellcheck disable=SC2086
-	f=$(ls -1 $OUT/$pat 2>/dev/null | head -1)
-	[ -n "$f" ] || { note_fail "缺少镜像：$pat"; continue; }
-	IMAGES="$IMAGES $f"
-	printf '  %-52s %s\n' "$(basename "$f")" "$(du -h "$f" | cut -f1)"
-done
+case "$TARGET" in
+x86_64)
+	for pat in '*-squashfs-combined-efi.img.gz' '*-squashfs-combined.img.gz' \
+	           '*-ext4-combined-efi.img.gz' '*-ext4-combined.img.gz'; do
+		# shellcheck disable=SC2086
+		f=$(ls -1 $OUT/$pat 2>/dev/null | head -1)
+		[ -n "$f" ] || { note_fail "缺少镜像：$pat"; continue; }
+		IMAGES="$IMAGES $f"
+		printf '  %-52s %s\n' "$(basename "$f")" "$(du -h "$f" | cut -f1)"
+	done
 
-# targz 与 rootfs.tar.gz 在配置里关掉了，不该出现。出现了说明配置没生效。
-if ls -1 "$OUT"/*targz* >/dev/null 2>&1; then
-	note_fail "出现了 targz 产物，配置里的 TARGZ 关闭没生效"
-fi
+	# targz 与 rootfs.tar.gz 在配置里关掉了，不该出现。出现了说明配置没生效。
+	if ls -1 "$OUT"/*targz* >/dev/null 2>&1; then
+		note_fail "出现了 targz 产物，配置里的 TARGZ 关闭没生效"
+	fi
+	;;
+rockchip-armv8)
+	# rockchip 目标会**为每个启用的文件系统类型各出一个** sysupgrade 镜像。
+	# defconfig 默认把 squashfs 与 ext4 都打开，所以实际是两个：
+	#     …-hinlink_ht2-squashfs-sysupgrade.img.gz
+	#     …-hinlink_ht2-ext4-sysupgrade.img.gz
+	#
+	# 这一条是**实测出来的**：最初按「只有一个镜像」写，结果报表里只列出
+	# `ls | head -1` 拿到的那一个（ext4，字典序在前），squashfs 那个静默漏掉。
+	# 少列一个不会让构建失败，但 Release 说明与附件清单就与事实不符了。
+	#
+	# 必须点名 hinlink_ht2：这个目录是所有 rockchip 设备共用的，
+	# 只数「有几个 sysupgrade.img.gz」会把别人编的镜像也算进来。
+	for fs in squashfs ext4; do
+		f=$(ls -1 "$OUT"/*hinlink_ht2-${fs}-sysupgrade.img.gz 2>/dev/null | head -1)
+		[ -n "$f" ] || { note_fail "缺少 ${fs} 镜像：*hinlink_ht2-${fs}-sysupgrade.img.gz"; continue; }
+		IMAGES="$IMAGES $f"
+		printf '  %-52s %s\n' "$(basename "$f")" "$(du -h "$f" | cut -f1)"
+	done
+
+	# 别的文件系统的镜像不该出现 —— 出现了说明顶层的 fs-type 配置被改过，
+	# 而 Release 附件清单是按上面两种写死的。
+	_extra=$(ls -1 "$OUT"/*hinlink_ht2*sysupgrade.img.gz 2>/dev/null \
+		| grep -vE -- '-(squashfs|ext4)-sysupgrade\.img\.gz$' || true)
+	if [ -n "$_extra" ]; then
+		warn "出现了预期之外的镜像："
+		printf '  %s\n' $_extra >&2
+		note_fail "rockchip 目标只应有 squashfs 与 ext4 两种 sysupgrade 镜像"
+	fi
+
+	# 这里不再单独核对 U-Boot：rockchip 的 u-boot-rockchip.bin 不是独立产物，
+	# 它由 pine64-img 直接 dd 进 sysupgrade.img 开头的 32768 个扇区
+	# （见 target/linux/rockchip/image/Makefile）。所以「镜像存在」这一条
+	# 已经隐含了「U-Boot 存在」。真正该在实机上确认的是能不能起来 ——
+	# 那属于刷机后的验证，离线核验做不到。
+	;;
+esac
 
 # ---------------------------------------------------------------------------
 # 2. 校验和
@@ -70,7 +120,7 @@ if [ -f "$OUT/sha256sums" ]; then
 			got=$(sha256sum "$f" | cut -d' ' -f1)
 			[ "$want" = "$got" ] || note_fail "$b 校验和不符"
 		done
-		[ "$FAILED" = "0" ] && say "四个镜像校验和全部通过" || true
+		[ "$FAILED" = "0" ] && say "镜像校验和全部通过" || true
 	fi
 else
 	note_fail "没有 sha256sums 文件"
@@ -145,17 +195,27 @@ fi
 # 否则刷上去以后是默认主题，用户看到的和勾的不是一回事。
 # ---------------------------------------------------------------------------
 say "核对主题与首页（期望：$THEME）"
-ROOTFS_IMG=$(ls -1 "$OUT"/*-rootfs.img 2>/dev/null | head -1)
-if [ -n "$ROOTFS_IMG" ]; then
-	# rootfs 是 squashfs / ext4，挂载需要 root，CI 里代价太大。
-	# 退而求其次：确认 uci-defaults 脚本进了包文件清单。
-	if printf '%s\n' "$PKGS" | grep -qx "build-defaults"; then
-		say "build-defaults 在固件里（承载管理地址与主题锁定）"
-	else
-		note_fail "build-defaults 不在固件里，管理地址与主题都不会生效"
-	fi
+# 判据是**包清单**，不是 rootfs 镜像文件。
+#
+# 原先这里用 `ls *-rootfs.img` 是否存在来门控，在 x86 上碰巧成立 ——
+# x86 会出独立的 rootfs.img.gz。但 rockchip 只出一个 sysupgrade.img.gz
+# （rootfs 被拼在里面），于是这条断言会掉进 else 分支「跳过」。
+# 那正是这个项目最反对的失败模式：构建全绿、断言静默失效。
+#
+# manifest 是编译系统自己产出的最终包列表，两个目标都有，直接用它。
+if printf '%s\n' "$PKGS" | grep -qx "build-defaults"; then
+	say "build-defaults 在固件里（承载管理地址与主题锁定）"
 else
-	say "跳过 rootfs 内容检查（没找到 rootfs 镜像）"
+	note_fail "build-defaults 不在固件里，管理地址与主题都不会生效"
+fi
+
+# 主题包本身也必须真在。
+if [ -n "${THEME_PKG:-}" ]; then
+	if printf '%s\n' "$PKGS" | grep -qx "$THEME_PKG"; then
+		say "主题包在固件里：$THEME_PKG"
+	else
+		note_fail "主题包不在固件里：$THEME_PKG（勾选与实际不符）"
+	fi
 fi
 
 # ---------------------------------------------------------------------------

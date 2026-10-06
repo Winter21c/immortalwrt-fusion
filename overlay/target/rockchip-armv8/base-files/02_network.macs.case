@@ -1,0 +1,7 @@
+	hinlink,ht2)
+		# 板子上没有存 MAC 的 EEPROM（对照过 HT2 厂商 DTS：i2c 一路都没开），
+		# 所以跟 H28K 一样从 eMMC 的 CID 派生。
+		# 单独一个分支而不是并进 H28K 那组：HT2 没有 wan 口，走那组会生成
+		# 一个指向不存在接口的 network.wan 段。
+		lan_mac=$(macaddr_generate_from_mmc_cid mmcblk0)
+		;;

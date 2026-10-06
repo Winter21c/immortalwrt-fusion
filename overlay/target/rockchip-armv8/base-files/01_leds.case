@@ -1,0 +1,5 @@
+hinlink,ht2)
+	# 单网口机器：唯一的那个口就是 LAN，绿灯跟 eth0，蓝灯跟无线。
+	ucidef_set_led_netdev "lan" "LAN" "green:status" "eth0"
+	ucidef_set_led_netdev "wlan" "WLAN" "blue:wlan" "phy0-ap0"
+	;;

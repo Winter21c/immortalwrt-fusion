@@ -1,0 +1,6 @@
+	hinlink,ht2)
+		# HT2 只有一个 RTL8211F 千兆口（gmac1），没有第二个口可用作 WAN。
+		# 这里显式写出而不是依赖下面的默认分支：默认分支将来若被改动，
+		# 单网口设备会静默地多出一个不存在的 wan 接口。
+		ucidef_set_interface_lan 'eth0'
+		;;

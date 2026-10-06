@@ -1,0 +1,60 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Winter21c <winter21c@users.noreply.github.com>
+Date: Mon, 6 Oct 2025 12:00:00 +0800
+Subject: [PATCH] pylibfdt: use the Python 3 C API instead of the Py2 aliases
+
+SWIG 4.5.0 removed the Python 2 compatibility macros (PyInt_*, PyString_*)
+that it used to emit into every wrapper. libfdt.i relies on those macros, so
+pylibfdt no longer compiles:
+
+    libfdt_wrap.c: error: implicit declaration of function 'PyInt_AsLong'
+    libfdt_wrap.c: error: implicit declaration of function 'PyString_FromString'
+
+pylibfdt is not optional for us: uboot-rockchip sets UBOOT_USE_INTREE_DTC=1
+so that the in-tree dtc/pylibfdt is used, and the failure shows up as
+
+    make[6]: *** [scripts/dtc/pylibfdt/Makefile:33:rebuild] Error 1
+    make[4]: *** [Makefile:2318: scripts_dtc] Error 2
+
+which reads like a board or toolchain problem but is neither.
+
+Replace the three uses with their Python 3 equivalents. This is safe on
+Python 3 by definition (SWIG's removed macros were aliases to exactly these
+functions), and this code path is already Python-3-only -- the surrounding
+%#if PY_VERSION_HEX >= 0x03000000 blocks say so.
+
+The same change is what dtc upstream and the Yocto/OE u-boot recipe carry,
+so this patch can be dropped once u-boot updates its bundled copy.
+
+Signed-off-by: Winter21c <winter21c@users.noreply.github.com>
+---
+ scripts/dtc/pylibfdt/libfdt.i_shipped | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+--- a/scripts/dtc/pylibfdt/libfdt.i_shipped
++++ b/scripts/dtc/pylibfdt/libfdt.i_shipped
+@@ -1033,7 +1033,7 @@
+ 	PyObject *buff;
+ 
+ 	if ($1) {
+-		resultobj = PyString_FromString(
++		resultobj = PyUnicode_FromString(
+ 			fdt_string(fdt1, fdt32_to_cpu($1->nameoff)));
+ 		buff = PyByteArray_FromStringAndSize(
+ 			(const char *)($1 + 1), fdt32_to_cpu($1->len));
+@@ -1064,13 +1064,13 @@
+         }
+         $1 = PyBytes_AsString($input);
+     %#else
+-        $1 = PyString_AsString($input);   /* char *str */
++        $1 = PyBytes_AsString($input);   /* char *str */
+     %#endif
+ }
+ 
+ /* typemaps used for fdt_next_node() */
+ %typemap(in, numinputs=1) int *depth (int depth) {
+-   depth = (int) PyInt_AsLong($input);
++   depth = (int) PyLong_AsLong($input);
+    $1 = &depth;
+ }
+ 

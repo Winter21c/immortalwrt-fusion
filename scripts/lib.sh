@@ -33,6 +33,61 @@ normalize_bool() {
 	esac
 }
 
+# normalize_target <值>
+#
+# 目标平台的取值校验。这里刻意**不做**任何别名映射 ——
+# TARGET 会被拼进产物路径（bin/targets/<board>/<subtarget>）与脚本分支，
+# 一个拼错的别名不会报错，只会让你在 x86 目录里找不到 rockchip 的产物。
+# 所以只认两个写死的值，别的当场失败。
+#
+# 目前支持：
+#   x86_64          bin/targets/x86/64
+#   rockchip-armv8  bin/targets/rockchip/armv8（RK3528/RK35xx，含 HINLINK HT2）
+normalize_target() {
+	case "${1:-}" in
+		x86_64) echo x86_64 ;;
+		rockchip-armv8) echo rockchip-armv8 ;;
+		'') die "TARGET 不能为空" ;;
+		*) die "无法识别的目标 '${1}'。
+     只支持：
+       x86_64          面向 x86 软路由（默认）
+       rockchip-armv8  面向 RK3528/RK35xx，目前含 HINLINK HT2" ;;
+	esac
+}
+
+# target_outdir <TARGET>
+#
+# 产物目录。单独抽出来是因为 build.sh（打印路径）、09-verify.sh（核对产物）、
+# 以及 CI 的上传步骤都要用同一份映射 —— 三处各写一遍迟早会不一致。
+target_outdir() {
+	case "$1" in
+		x86_64) echo "bin/targets/x86/64" ;;
+		rockchip-armv8) echo "bin/targets/rockchip/armv8" ;;
+		*) die "target_outdir: 未知目标 '$1'" ;;
+	esac
+}
+
+# target_human <TARGET>
+target_human() {
+	case "$1" in
+		x86_64) echo "x86_64 软路由" ;;
+		rockchip-armv8) echo "Rockchip RK3528/RK35xx（HINLINK HT2）" ;;
+		*) echo "$1" ;;
+	esac
+}
+
+# target_config_file <TARGET>
+#
+# 目标层配置片段的路径（相对项目根）。与 target_outdir 同样的理由：
+# 只在一处写死映射。
+target_config_file() {
+	case "$1" in
+		x86_64) echo "config/00-target.config" ;;
+		rockchip-armv8) echo "config/00-target-rockchip-armv8.config" ;;
+		*) die "target_config_file: 未知目标 '$1'" ;;
+	esac
+}
+
 # require_cmd <命令名>...
 require_cmd() {
 	for _c in "$@"; do

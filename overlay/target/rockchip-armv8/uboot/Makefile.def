@@ -1,0 +1,6 @@
+define U-Boot/hinlink-ht2-rk3528
+  $(U-Boot/rk3528/Default)
+  NAME:=HINLINK HT2
+  BUILD_DEVICES:= \
+    hinlink_ht2
+endef

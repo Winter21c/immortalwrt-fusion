@@ -122,14 +122,14 @@ enumerate_fanchmwrt_pkgs() {
 # ---------------------------------------------------------------------------
 # 1. 拼 .config
 # ---------------------------------------------------------------------------
-say "生成 .config（FanchmWrt=$WITH_FANCHMWRT iStoreOS=$WITH_ISTOREOS Docker=$ENABLE_DOCKER）"
+say "生成 .config（目标=$TARGET FanchmWrt=$WITH_FANCHMWRT iStoreOS=$WITH_ISTOREOS Docker=$ENABLE_DOCKER）"
 
 {
 	printf '# 由 scripts/04-config.sh 生成 —— 不要手工编辑，下次构建会覆盖。\n'
-	printf '# 本次参数：FanchmWrt=%s iStoreOS=%s Docker=%s LAN=%s rootfs=%sMB\n\n' \
-		"$WITH_FANCHMWRT" "$WITH_ISTOREOS" "$ENABLE_DOCKER" "${LAN_IP:-默认}" "$ROOTFS_PARTSIZE"
-	cat "$PROJECT_ROOT/config/00-target.config"
-	printf '\n# 固件大小：用户在 Actions 里选的，覆盖 00-target.config 里的默认值\n'
+	printf '# 本次参数：目标=%s FanchmWrt=%s iStoreOS=%s Docker=%s LAN=%s rootfs=%sMB\n\n' \
+		"$TARGET" "$WITH_FANCHMWRT" "$WITH_ISTOREOS" "$ENABLE_DOCKER" "${LAN_IP:-默认}" "$ROOTFS_PARTSIZE"
+	cat "$PROJECT_ROOT/$(target_config_file "$TARGET")"
+	printf '\n# 固件大小：用户在 Actions 里选的，覆盖目标配置片段里的默认值\n'
 	printf 'CONFIG_TARGET_ROOTFS_PARTSIZE=%s\n\n' "$ROOTFS_PARTSIZE"
 	cat "$PROJECT_ROOT/config/10-base.config"
 
@@ -225,12 +225,16 @@ fi
 if [ "$WITH_FANCHMWRT" = "1" ]; then
 	THEME_NAME="FanchmWrt"
 	THEME_PATH="/luci-static/fanchmwrt"
+	THEME_PKG="luci-theme-fanchmwrt"
 elif [ "$WITH_ISTOREOS" = "1" ]; then
 	THEME_NAME="Argon"
 	THEME_PATH="/luci-static/argon"
+	THEME_PKG="luci-theme-argon"
 else
 	THEME_NAME=""
 	THEME_PATH=""
+	# 不锁主题时主题由 ImmortalWrt 默认决定，没有「必须存在的主题包」可断言。
+	THEME_PKG=""
 fi
 
 if [ -n "$THEME_PATH" ]; then
@@ -369,20 +373,52 @@ fi
 say "包清单核对通过：$(echo $MUST_HAVE | wc -w) 项必须在位，$(echo $MUST_NOT_HAVE | wc -w) 项确认排除"
 
 # --- 镜像相关配置 -----------------------------------------------------------
-for k in "CONFIG_TARGET_ROOTFS_SQUASHFS=y" "CONFIG_TARGET_ROOTFS_EXT4FS=y" \
-         "CONFIG_TARGET_IMAGES_GZIP=y" "CONFIG_TARGET_x86_64_DEVICE_generic=y"; do
-	grep -qx "$k" "$SRC/.config" || die "目标配置缺失：$k"
-done
-grep -qx "CONFIG_TARGET_ROOTFS_PARTSIZE=$ROOTFS_PARTSIZE" "$SRC/.config" \
-	|| die "固件大小没有生效：期望 CONFIG_TARGET_ROOTFS_PARTSIZE=$ROOTFS_PARTSIZE"
-# 这四个必须是关的，否则镜像数量和 Release 附件都会失控。
-# 末尾的 `|| true` 不能省：它是 for 循环体的最后一句，grep 不匹配时返回 1，
-# 在 set -e 下会把「一切正常」误判成失败。
-for k in "CONFIG_TARGET_ROOTFS_TARGZ" "CONFIG_TARGET_ROOTFS_INITRAMFS" \
-         "CONFIG_TARGET_ROOTFS_CPIOGZ"; do
-	grep -qx "CONFIG_$k=y" "$SRC/.config" && die "$k 本应关闭却开着 —— 会多出好几倍的镜像文件" || true
-done
-say "镜像配置核对通过（4 个镜像：squashfs / ext4 × efi / 非 efi，rootfs ${ROOTFS_PARTSIZE}MB）"
+#
+# 两个目标的镜像形态**完全不同**，所以断言必须跟着分叉。
+# 拿 x86 那套去查 rockchip，会死在「目标配置缺失 CONFIG_TARGET_x86_64_DEVICE_generic=y」
+# —— 报错内容指向一个具体的 kconfig 符号，看不出真正的原因只是目标选错了方向。
+case "$TARGET" in
+x86_64)
+	for k in "CONFIG_TARGET_ROOTFS_SQUASHFS=y" "CONFIG_TARGET_ROOTFS_EXT4FS=y" \
+	         "CONFIG_TARGET_IMAGES_GZIP=y" "CONFIG_TARGET_x86_64_DEVICE_generic=y"; do
+		grep -qx "$k" "$SRC/.config" || die "目标配置缺失：$k"
+	done
+	grep -qx "CONFIG_TARGET_ROOTFS_PARTSIZE=$ROOTFS_PARTSIZE" "$SRC/.config" \
+		|| die "固件大小没有生效：期望 CONFIG_TARGET_ROOTFS_PARTSIZE=$ROOTFS_PARTSIZE"
+	# 这四个必须是关的，否则镜像数量和 Release 附件都会失控。
+	# 末尾的 `|| true` 不能省：它是 for 循环体的最后一句，grep 不匹配时返回 1，
+	# 在 set -e 下会把「一切正常」误判成失败。
+	for k in "CONFIG_TARGET_ROOTFS_TARGZ" "CONFIG_TARGET_ROOTFS_INITRAMFS" \
+	         "CONFIG_TARGET_ROOTFS_CPIOGZ"; do
+		grep -qx "CONFIG_$k=y" "$SRC/.config" && die "$k 本应关闭却开着 —— 会多出好几倍的镜像文件" || true
+	done
+	say "镜像配置核对通过（4 个镜像：squashfs / ext4 × efi / 非 efi，rootfs ${ROOTFS_PARTSIZE}MB）"
+	;;
+rockchip-armv8)
+	# 关键的一条是设备符号本身：设备定义是 scripts/03-target.sh 追加进
+	# armv8.mk 的，如果那一步没跑或没跑成，这个符号就不会存在，
+	# 而 make defconfig 会**静默地**什么都不选 —— 最后编出一堆设备的镜像，
+	# 或者干脆编不出来。所以这里点名查它。
+	for k in "CONFIG_TARGET_rockchip=y" "CONFIG_TARGET_rockchip_armv8=y" \
+	         "CONFIG_TARGET_rockchip_armv8_DEVICE_hinlink_ht2=y"; do
+		grep -qx "$k" "$SRC/.config" || die "目标配置缺失：$k
+     多半是 scripts/03-target.sh 没跑成，或设备定义没追加进 armv8.mk。"
+	done
+	grep -qx "CONFIG_TARGET_ROOTFS_PARTSIZE=$ROOTFS_PARTSIZE" "$SRC/.config" \
+		|| die "固件大小没有生效：期望 CONFIG_TARGET_ROOTFS_PARTSIZE=$ROOTFS_PARTSIZE"
+
+	# 这个目录是所有 rockchip 设备共用的。如果 defconfig 把别的板子也选了，
+	# 构建时间会翻好几倍，产物理也混进别人的镜像 —— 所以只允许 HT2。
+	_extra=$(sed -n 's/^CONFIG_TARGET_rockchip_armv8_DEVICE_\(.*\)=y$/\1/p' "$SRC/.config" \
+	         | grep -v '^hinlink_ht2$' || true)
+	if [ -n "$_extra" ]; then
+		warn "除 hinlink_ht2 外还选中了别的 rockchip 设备："
+		printf '  %s\n' $_extra >&2
+		die "只应构建 hinlink_ht2。多选的设备会让构建时间成倍增长。"
+	fi
+	say "镜像配置核对通过（2 个镜像：hinlink_ht2 的 squashfs 与 ext4 sysupgrade，rootfs ${ROOTFS_PARTSIZE}MB）"
+	;;
+esac
 
 # ---------------------------------------------------------------------------
 # 5. 留一份期望清单给 scripts/09-verify.sh
@@ -391,6 +427,7 @@ say "镜像配置核对通过（4 个镜像：squashfs / ext4 × efi / 非 efi�
 # 去比对固件里真实的软件包列表，那才是最终事实。
 # ---------------------------------------------------------------------------
 {
+	echo "TARGET=$TARGET"
 	echo "WITH_FANCHMWRT=$WITH_FANCHMWRT"
 	echo "WITH_ISTOREOS=$WITH_ISTOREOS"
 	echo "ENABLE_DOCKER=$ENABLE_DOCKER"
@@ -399,6 +436,7 @@ say "镜像配置核对通过（4 个镜像：squashfs / ext4 × efi / 非 efi�
 	printf 'MUST_HAVE="%s"\n' "$MUST_HAVE"
 	printf 'MUST_NOT_HAVE="%s"\n' "$MUST_NOT_HAVE"
 	printf 'THEME=%s\n' "${THEME_NAME:-immortalwrt-default}"
+	printf 'THEME_PKG=%s\n' "${THEME_PKG:-}"
 } > "$GEN/expectations.env"
 
 say "期望清单已写入 .generated/expectations.env"

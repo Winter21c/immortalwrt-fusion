@@ -1,0 +1,382 @@
+# ===========================================================================
+# ImmortalWrt × FanchmWrt × iStoreOS 在线编译（Rockchip RK3528 / HINLINK HT2）
+#
+# 与「构建 x86_64 固件」是两个独立的工作流：目标决定的是**设备层**
+# （设备树 / U-Boot / board.d），与那几个特性复选框正交，产物也各自独立。
+#
+#   x86_64          openwrt/bin/targets/x86/64/          4 个 combined 镜像
+#   rockchip-armv8  openwrt/bin/targets/rockchip/armv8/  1 个 sysupgrade.img.gz
+#
+# 触发方式：
+#   1. 手动：Actions → 「构建 HT2 固件（Rockchip）」→ Run workflow
+#   2. 打 tag：push 一个 ht2-v* 标签，编译完自动发同名 Release
+# ===========================================================================
+name: 构建 HT2 固件（Rockchip）
+
+on:
+  workflow_dispatch:
+    inputs:
+      # ---------------------------------------------------------------------
+      # 特性选择：两个独立的复选框
+      # ---------------------------------------------------------------------
+      with_fanchmwrt:
+        description: '包含 FanchmWrt 特性（fwx 应用识别 / 仪表盘 / 高级·普通模式 / FanchmWrt 主题）'
+        type: boolean
+        default: true
+      with_istoreos:
+        description: '包含 iStoreOS 特性（QuickStart 首页 / iStore 应用商店 / argon 主题）'
+        type: boolean
+        default: true
+
+      # ---------------------------------------------------------------------
+      # 固件参数
+      # ---------------------------------------------------------------------
+      lan_ip:
+        description: '管理地址（LAN IP），可带前缀长度如 192.168.100.1/24'
+        type: string
+        default: '192.168.1.1'
+      rootfs_size:
+        description: '固件大小 / rootfs 分区（MB）。HT2 是 8/32/64GB eMMC'
+        type: choice
+        options: ['512', '1024', '2048', '4096', '8192']
+        default: '1024'
+      enable_docker:
+        description: '包含 Docker（dockerd + docker-compose + Dockerman 图形界面）'
+        type: boolean
+        # 与 x86 工作流保持一致：默认包含。
+        # HT2 低配版只有 1GB 内存，dockerd + containerd 常驻会吃掉相当一部分，
+        # 要省内存就在这里取消勾选。
+        default: true
+
+      # ---------------------------------------------------------------------
+      # 发布
+      # ---------------------------------------------------------------------
+      create_release:
+        description: '构建成功后创建 Release'
+        type: boolean
+        default: true
+      release_tag:
+        description: 'Release 标签（留空 = 自动用 日期-时间）'
+        type: string
+        required: false
+      upload_artifact:
+        description: '同时把镜像上传成构建产物（Actions 页面可直接下载）'
+        type: boolean
+        default: true
+
+  push:
+    tags:
+      - 'ht2-v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-rockchip-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: >-
+      编译 HT2 (RK3528) · FanchmWrt=${{
+        format('{0}', inputs.with_fanchmwrt) || 'true'
+      }} · iStoreOS=${{
+        format('{0}', inputs.with_istoreos) || 'true'
+      }} · LAN=${{
+        inputs.lan_ip || '192.168.1.1'
+      }} · Docker=${{
+        format('{0}', inputs.enable_docker) || 'false'
+      }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+
+    env:
+      # 目标平台。build.sh / 03-target.sh / 04-config.sh / 09-verify.sh
+      # 都读这一个变量 —— 三处各写一遍迟早会不一致，所以只在这里设一次。
+      TARGET: rockchip-armv8
+      # boolean 输入经 ${{ }} 插值到 shell 会变成字符串 'true'/'false'，
+      # 而 shell 里 'false' 是真值。交给 build.sh 里的 normalize_bool
+      # 统一转成 1/0 才是可靠的做法。
+      WITH_FANCHMWRT: ${{ inputs.with_fanchmwrt }}
+      WITH_ISTOREOS: ${{ inputs.with_istoreos }}
+      ENABLE_DOCKER: ${{ inputs.enable_docker }}
+      LAN_IP: ${{ inputs.lan_ip }}
+      ROOTFS_PARTSIZE: ${{ inputs.rootfs_size }}
+      CURL_OPTIONS: --speed-limit 51200 --speed-time 60
+
+    steps:
+      - name: 打印本次参数
+        run: |
+          echo "目标平台        = $TARGET"
+          echo "FanchmWrt 特性  = ${WITH_FANCHMWRT:-（空 → 默认包含）}"
+          echo "iStoreOS 特性   = ${WITH_ISTOREOS:-（空 → 默认包含）}"
+          echo "Docker          = ${ENABLE_DOCKER:-（空 → 默认不含）}"
+          echo "管理地址        = ${LAN_IP:-（空 → 默认 192.168.1.1）}"
+          echo "rootfs 分区     = ${ROOTFS_PARTSIZE:-（空 → 默认 1024）} MB"
+
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      # ---------------------------------------------------------------------
+      # 全量编译需要约 30GB；ARM 目标还要多编一套工具链。
+      - name: 释放磁盘空间
+        run: |
+          echo "=== 清理前 ==="
+          df -h /
+          sudo rm -rf \
+            /usr/share/dotnet \
+            /usr/local/lib/android \
+            /usr/local/share/boost \
+            /opt/ghc \
+            /opt/hostedtoolcache/CodeQL \
+            /usr/share/swift \
+            /usr/local/.ghcup \
+            /opt/az \
+            /usr/lib/jvm || true
+          sudo apt-get clean
+          echo "=== 清理后 ==="
+          df -h /
+
+      - name: 安装编译依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential clang flex bison g++ gawk gettext \
+            git libncurses-dev libssl-dev python3-setuptools \
+            rsync swig unzip zlib1g-dev file wget time \
+            device-tree-compiler cpio bc
+
+      # ---------------------------------------------------------------------
+      # 缓存下载的源码包。ARM 侧要额外下 u-boot / trusted-firmware-a /
+      # armbian-firmware（约 200MB）等；key 里带目标名，免得和 x86 互相覆盖。
+      - name: 缓存源码包
+        uses: actions/cache@v4
+        with:
+          path: openwrt/dl
+          key: dl-rockchip-${{ hashFiles('feeds.conf.append', 'upstreams.conf') }}
+          restore-keys: |
+            dl-rockchip-
+            dl-
+
+      # ---------------------------------------------------------------------
+      # 走仓库里的 build.sh，与本地完全同一条路径 —— 不会出现
+      # 「本地能编、CI 编不出来」。SKIP_BUILD 让它在下载/编译前停下，
+      # 把日志和重试边界分开。
+      - name: 准备（源码 / feed / 特性层 / 目标层 / 配置与断言）
+        env:
+          SKIP_BUILD: '1'
+        run: ./build.sh
+
+      - name: 下载源码包
+        run: cd openwrt && make -j"$(nproc)" download || echo "::warning::部分源码包下载失败，编译阶段 make 会重试"
+
+      - name: 编译固件
+        run: cd openwrt && make -j"$(nproc)" BUILD_LOG=1
+
+      # ---------------------------------------------------------------------
+      - name: 编译失败时输出日志
+        if: failure()
+        run: |
+          echo "=== 最近修改的构建日志 ==="
+          find openwrt/logs -type f -name '*.txt' -printf '%T@ %p\n' 2>/dev/null \
+            | sort -rn | head -3 | cut -d' ' -f2- \
+            | while read -r f; do
+                echo "----- $f -----"
+                tail -60 "$f"
+              done
+          echo "=== 磁盘占用 ==="
+          df -h /
+
+      # ---------------------------------------------------------------------
+      # 核验产物：编译通过不等于编对了。
+      - name: 核验产物
+        run: ./scripts/09-verify.sh
+
+      - name: 汇总产物信息
+        id: summary
+        run: |
+          # 这个工作流本来就只服务 rockchip-armv8 一个目标，路径写死即可 ——
+          # 从 .generated/expectations.env 反推路径只会多一层可能出错的地方。
+          OUT=openwrt/bin/targets/rockchip/armv8
+          MANIFEST=$(ls -1 "$OUT"/*.manifest | head -1)
+          PKGCOUNT=$(wc -l < "$MANIFEST")
+          VERSION=$(cat "$OUT/version.buildinfo" 2>/dev/null || echo unknown)
+
+          # 用脚本真正解析后的值，而不是 inputs ——
+          # 打标签触发时 inputs.* 是空的，那样会发出一个写着「0 MB」的说明。
+          # shellcheck disable=SC1091
+          . .generated/expectations.env
+          [ "$WITH_FANCHMWRT" = "1" ] && FANCHM_TXT="包含" || FANCHM_TXT="不含"
+          [ "$WITH_ISTOREOS" = "1" ] && ISTORE_TXT="包含" || ISTORE_TXT="不含"
+          [ "$ENABLE_DOCKER" = "1" ] && DOCKER_TXT="包含" || DOCKER_TXT="不含"
+          [ -n "$LAN_IP" ] || LAN_IP="192.168.1.1（ImmortalWrt 默认）"
+          LAN_HOST="${LAN_IP%%/*}"
+
+          {
+            echo "pkgcount=$PKGCOUNT"
+            echo "version=$VERSION"
+            echo "lan_ip=$LAN_IP"
+            echo "lan_host=$LAN_HOST"
+            echo "fanchm=$FANCHM_TXT"
+            echo "istore=$ISTORE_TXT"
+            echo "docker=$DOCKER_TXT"
+            echo "theme=$THEME"
+            echo "rootfs=$ROOTFS_PARTSIZE"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### 构建成功（HINLINK HT2 / RK3528）"
+            echo ""
+            echo "| 项目 | 值 |"
+            echo "|---|---|"
+            echo "| 底座 | ImmortalWrt 25.12 (aarch64) |"
+            echo "| 版本 | \`$VERSION\` |"
+            echo "| FanchmWrt 特性 | $FANCHM_TXT |"
+            echo "| iStoreOS 特性 | $ISTORE_TXT |"
+            echo "| Docker | $DOCKER_TXT |"
+            echo "| 主题 | $THEME |"
+            echo "| 管理地址 | \`$LAN_IP\` |"
+            echo "| rootfs 分区 | ${ROOTFS_PARTSIZE} MB |"
+            echo "| 已安装软件包 | $PKGCOUNT 个 |"
+            echo "| 产物核验 | 全部通过 |"
+            echo ""
+            echo "**登录**：<http://$LAN_HOST> ｜ 用户 \`root\` ｜ 密码 \`password\`（首次登录请立刻改）"
+            echo ""
+            echo "> HT2 只有一个网口，它就是 LAN。"
+            echo ""
+            echo "| 镜像 | 大小 |"
+            echo "|---|---|"
+            for f in "$OUT"/*hinlink_ht2*sysupgrade.img.gz; do
+              [ -e "$f" ] || continue
+              printf '| `%s` | %s |\n' "$(basename "$f")" "$(du -h "$f" | cut -f1)"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # ---------------------------------------------------------------------
+      - name: 上传构建产物
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.upload_artifact }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: immortalwrt-fusion-ht2
+          path: |
+            openwrt/bin/targets/rockchip/armv8/*hinlink_ht2*sysupgrade.img.gz
+            openwrt/bin/targets/rockchip/armv8/sha256sums
+          if-no-files-found: error
+          retention-days: 30
+
+      # ---------------------------------------------------------------------
+      # 发布
+      # ---------------------------------------------------------------------
+      - name: 确定 Release 标签
+        id: tag
+        if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.create_release) }}
+        run: |
+          if [ "${GITHUB_EVENT_NAME}" = "push" ]; then
+            TAG="${GITHUB_REF_NAME}"
+          else
+            TAG="${{ inputs.release_tag }}"
+            [ -n "$TAG" ] || TAG="ht2-$(date -u +%Y%m%d-%H%M)"
+          fi
+          case "$TAG" in
+            *[!A-Za-z0-9._-]*|'')
+              echo "::error::非法的 Release 标签：'$TAG'"
+              exit 1
+              ;;
+          esac
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "将使用标签：$TAG"
+
+      - name: 生成 Release 说明
+        if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.create_release) }}
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+          PKGCOUNT: ${{ steps.summary.outputs.pkgcount }}
+          VERSION: ${{ steps.summary.outputs.version }}
+          LAN_IP: ${{ steps.summary.outputs.lan_ip }}
+          LAN_HOST: ${{ steps.summary.outputs.lan_host }}
+          FANCHM: ${{ steps.summary.outputs.fanchm }}
+          ISTORE: ${{ steps.summary.outputs.istore }}
+          DOCKER: ${{ steps.summary.outputs.docker }}
+          THEME: ${{ steps.summary.outputs.theme }}
+          ROOTSIZE: ${{ steps.summary.outputs.rootfs }}
+        run: |
+          # 用 bash 参数展开做模板替换，不用 sed ——
+          # 管理地址形如 192.168.100.1/24，sed 's/@LANIP@/192.168.100.1/24/g'
+          # 会被替换值里的 / 提前截断。
+          shopt -u patsub_replacement 2>/dev/null || true
+
+          template="$(cat .github/release-notes-ht2.md)"
+          template="${template//@TAG@/$TAG}"
+          template="${template//@VERSION@/$VERSION}"
+          template="${template//@PKGCOUNT@/$PKGCOUNT}"
+          template="${template//@LANIP@/$LAN_HOST}"
+          template="${template//@LANIPFULL@/$LAN_IP}"
+          template="${template//@FANCHM@/$FANCHM}"
+          template="${template//@ISTORE@/$ISTORE}"
+          template="${template//@DOCKER@/$DOCKER}"
+          template="${template//@THEME@/$THEME}"
+          template="${template//@ROOTSIZE@/$ROOTSIZE}"
+          template="${template//@DATE@/$(date -u +%Y-%m-%d)}"
+          printf '%s\n' "$template" > /tmp/release-notes.md
+
+          # 兜底自检：模板里有新占位符而这里漏了替换的话，
+          # 宁可在这里失败，也不要发一份带着 @XXX@ 的 Release 出去。
+          if grep -qE '@[A-Z_]+@' /tmp/release-notes.md; then
+            echo "::error::Release 说明里仍有未替换的占位符："
+            grep -oE '@[A-Z_]+@' /tmp/release-notes.md | sort -u
+            exit 1
+          fi
+
+          echo "=== Release 说明预览 ==="
+          head -30 /tmp/release-notes.md
+
+      - name: 创建或更新 Release
+        if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.create_release) }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -e
+          OUT=openwrt/bin/targets/rockchip/armv8
+
+          # rockchip 目标**为每个启用的文件系统类型各出一个**镜像，
+          # 所以是 2 个（squashfs + ext4），不是一个 —— 这是实测出来的，
+          # 最初按 1 个写，断言会把一次完全正常的构建判成失败。
+          ASSETS=$(ls -1 "$OUT"/*hinlink_ht2-squashfs-sysupgrade.img.gz \
+                           "$OUT"/*hinlink_ht2-ext4-sysupgrade.img.gz \
+                           "$OUT"/sha256sums)
+
+          # 发布前兜底：确认恰好是 2 个镜像 + 1 个校验和。
+          # 子目标下混进别的板子、或顶层 fs-type 被改过时，会在这一步暴露 ——
+          # 该修的是配置，而不是把一份与说明不符的附件列表发出去。
+          IMG_COUNT=$(printf '%s\n' $ASSETS | grep -c '\.img\.gz$' || true)
+          if [ "$IMG_COUNT" -ne 2 ]; then
+            echo "::error::期望 2 个镜像（squashfs + ext4），实际找到 $IMG_COUNT 个："
+            printf '%s\n' $ASSETS
+            exit 1
+          fi
+          echo "将发布的附件："
+          printf '  %s\n' $ASSETS
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG 已存在，同步附件"
+            gh release upload "$TAG" $ASSETS --clobber
+            gh release view "$TAG" --json assets --jq '.assets[].name' | while read -r name; do
+              [ -n "$name" ] || continue
+              if printf '%s\n' $ASSETS | grep -qxF "$OUT/$name"; then
+                echo "  保留 $name"
+              else
+                echo "  删除过期附件 $name"
+                gh release delete-asset "$TAG" "$name" --yes || true
+              fi
+            done
+            gh release edit "$TAG" --notes-file /tmp/release-notes.md
+          else
+            gh release create "$TAG" \
+              --title "ImmortalWrt × FanchmWrt × iStoreOS · HT2 $TAG" \
+              --notes-file /tmp/release-notes.md \
+              $ASSETS
+          fi
+          echo "完成：$(gh release view "$TAG" --json url --jq .url)"

@@ -8,7 +8,15 @@
 
 **以 [ImmortalWrt](https://github.com/immortalwrt/immortalwrt) 为底座，在 GitHub Actions 上按需并入 [FanchmWrt](https://github.com/fanchmwrt/fanchmwrt) 或 [iStoreOS](https://github.com/istoreos/istoreos) 的特性，编完自动发 Release。**
 
-面向 **x86_64**。底座 ImmortalWrt 25.12。
+底座 ImmortalWrt 25.12。两个目标，各自独立出产物：
+
+| 目标 | 工作流 | 产物 |
+|---|---|---|
+| **x86_64** 软路由 | 「构建 x86_64 固件」 | 4 个 combined 镜像（squashfs / ext4 × efi / 非 efi） |
+| **rockchip-armv8** HINLINK HT2（RK3528） | 「构建 HT2 固件（Rockchip）」 | 2 个 `sysupgrade.img.gz`（squashfs / ext4，各含 u-boot） |
+
+> 「目标」与「特性」是**正交**的两件事：目标决定设备层（设备树 / U-Boot / board.d），
+> 特性决定包选集。所以任意目标 × 任意特性组合都成立，上面那两个工作流的复选框是一样的。
 
 ---
 
@@ -85,6 +93,104 @@ git push origin v25.12.1-fusion.1
 
 > GitHub 会在仓库**连续 60 天没有任何提交活动**后自动停用定时工作流，
 > 需要在 Actions 页面手动重新启用。
+
+---
+
+## 📡 目标二：HINLINK HT2（Rockchip RK3528）
+
+x86 那套是软路由；这一套是一台**实体小盒子**。硬件：
+
+| | |
+|---|---|
+| SoC | Rockchip RK3528A（4× Cortex-A53） |
+| 内存 / 存储 | LPDDR4 1 / 2 / 4 GB ｜ eMMC 8 / 32 / 64 GB + microSD |
+| 网络 | **1 个千兆口**（RTL8211F，接在 gmac1 上） |
+| 无线 | SDIO WiFi 6，两个批次：AMPAK AP6275S（BCM43752）或 AICSemi AIC8800 |
+| 调试串口 | UART0，**1500000** 8N1（不是 115200） |
+
+### 无线为什么两套驱动都装
+
+HT2 至少有两个批次，厂商 DTS 写的是 `wifi_chip_type = "ap6275s"`，
+而网上流传的 iStoreOS 教程里移植的是 AIC8800D80。
+
+两者在设备树上是**同一套接线** —— 都挂 `&sdio0`、共用 GPIO1_A6 复位脚 ——
+所以 DTS 不用改，差别只在驱动与固件。把两套都编进去之后，
+开机 `dmesg | grep -iE "brcmfmac|aicwf"` 谁认到就是谁，不需要先拆机确认。
+
+### 刷机
+
+产物有两个（每个启用的文件系统类型各一个）—— 两个都是完整的磁盘镜像，
+**u-boot 已经在镜像开头**：
+
+| 文件 | 说明 |
+|---|---|
+| `…hinlink_ht2-squashfs-sysupgrade.img.gz` | ⭐ **推荐**。只读根 + overlay，支持恢复出厂 |
+| `…hinlink_ht2-ext4-sysupgrade.img.gz` | 可写根，装大件更省空间，但没有一键恢复出厂 |
+
+```sh
+# 写 microSD（首次安装走这条路）
+gunzip -c ...-hinlink_ht2-squashfs-sysupgrade.img.gz | sudo dd of=/dev/sdX bs=4M conv=fsync
+```
+
+```sh
+插卡上电即从卡启动（u-boot 的顺序是 SD → eMMC）。
+
+要装进 eMMC，**从 SD 启动后不要直接 sysupgrade** —— 那样写的是 SD 卡本身。
+要指名设备：
+
+```sh
+cat /proc/partitions        # 从 SD 启动时：eMMC = mmcblk0，SD = mmcblk1
+gunzip -c ...-hinlink_ht2-squashfs-sysupgrade.img.gz | dd of=/dev/mmcblk0 bs=4M conv=fsync
+sync && poweroff             # 拔卡再上电，就从 eMMC 启动了
+```
+
+装好之后 `sysupgrade -k <img>` 就是对的（写 eMMC、保留配置）。
+
+> ⚠️ `sysupgrade` 会把 u-boot 一起重写（保证引导与内核配套）。
+> 刷写中途断电要用 Maskrom 模式救回来，刷之前确认供电稳定。
+
+### 设备层是怎么铺进去的
+
+不在 `config/` 里，也不在 `vendor/` 里，而是单独一层：
+
+```
+overlay/target/rockchip-armv8/
+├── kernel-patches/102-arm64-dts-rockchip-Add-HINLINK-HT2.patch   设备树
+├── uboot-patches/113-board-rockchip-add-HINLINK-HT2.patch        U-Boot 板级支持
+├── image/armv8.devices.mk                                        设备定义
+├── base-files/*.case                                             LED / 网络 / MAC
+└── uboot/Makefile.def
+```
+
+另外还有一个**跟板子无关、但不加就编不出来**的补丁：
+
+```
+uboot-patches/115-uboot-pylibfdt-fix-python3-api-for-swig-4.5.patch
+```
+
+U-Boot 自带的 `scripts/dtc/pylibfdt/libfdt.i` 用了三处 Python 2 的 C API
+（`PyInt_AsLong` / `PyString_FromString` / `PyString_AsString`）。这些 API 在
+Python 3 里不存在，一直能编只是因为 **SWIG 会自动插一段兼容宏把它们别名到
+Python 3 的函数**；SWIG 4.5.0 删掉了那段宏，于是 pylibfdt 编不过：
+
+```
+libfdt_wrap.c: error: implicit declaration of function 'PyInt_AsLong'
+make[4]: *** [Makefile:2318: scripts_dtc] Error 2
+```
+
+看起来像板级支持写错了，其实不是。而且绕不过去：rockchip 的 U-Boot 需要
+**树内**的 dtc（`UBOOT_USE_INTREE_DTC:=1`），用了树内 dtc 就会连 pylibfdt 一起编；
+`NO_PYTHON=y` 能跳过它，但会**连 binman 一起跳过**，而 `u-boot-rockchip.bin`
+正是 binman 拼出来的。
+
+改法就是那 3 行替换（[Yocto/OE-core 的 u-boot 配方](https://patchwork.yoctoproject.org/project/oe-core/patch/20260811111120.17612-4-jaipaul.cheernam@est.tech/)
+与 [Armbian](https://github.com/armbian/build/pull/10217) 用的是同一套）。
+上游自带修复后可以直接删掉这个补丁。
+
+由 `scripts/03-target.sh` 幂等铺进去。**这几个文件在两棵上游树里的内容不一样**
+（举例：ImmortalWrt 的 `armv8.mk` 里没有 `hinlink_h28k`，fanchmwrt 那棵树里有），
+所以这里按「结构锚点」插入（认 `esac`、case 的默认分支、设备清单的边界），
+而不是打按上下文匹配的补丁 —— 后者会在上游加板子的那天失效。
 
 ---
 
@@ -267,7 +373,7 @@ FANCHMWRT_REF=fanchmwrt-25.12.4   # 上游按 OpenWrt 版本开分支
 git clone https://github.com/Winter21c/immortalwrt-fusion.git
 cd immortalwrt-fusion
 
-./build.sh                              # 默认：两个特性都要、含 Docker
+./build.sh                              # 默认：x86_64、两个特性都要、含 Docker
 ./build.sh 12                           # 指定并发数
 
 # 只要 iStoreOS
@@ -279,16 +385,23 @@ WITH_FANCHMWRT=0 WITH_ISTOREOS=0 ENABLE_DOCKER=0 ./build.sh
 # 自定义管理地址与固件大小
 LAN_IP=192.168.100.1/24 ROOTFS_PARTSIZE=2048 ./build.sh
 
+# 编 HT2（Rockchip RK3528）。Docker 要省内存就显式关掉
+TARGET=rockchip-armv8 ./build.sh
+TARGET=rockchip-armv8 ENABLE_DOCKER=0 ./build.sh
+
 # 只做到准备就绪，不下载也不编译（几秒钟就能知道配置对不对）
 SKIP_BUILD=1 ./build.sh
+TARGET=rockchip-armv8 SKIP_BUILD=1 ./build.sh
 ```
 
-产物在 `openwrt/bin/targets/x86/64/`。
+产物在 `openwrt/bin/targets/<board>/<subtarget>/`：
+x86_64 是 `bin/targets/x86/64/`，HT2 是 `bin/targets/rockchip/armv8/`。
 
 **环境变量**
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
+| `TARGET` | `x86_64` | 目标平台：`x86_64` 或 `rockchip-armv8` |
 | `WITH_FANCHMWRT` | `1` | 是否并入 FanchmWrt 特性 |
 | `WITH_ISTOREOS` | `1` | 是否并入 iStoreOS 特性 |
 | `ENABLE_DOCKER` | `1` | 是否包含 Docker |
@@ -298,6 +411,9 @@ SKIP_BUILD=1 ./build.sh
 | `SKIP_BUILD` | `0` | 只准备不编译 |
 | `SKIP_FEEDS_UPDATE` | `0` | 复用已有 feeds，跳过 update |
 
+> `TARGET` 只认这两个写死的值，**没有别名映射**。它会被拼进产物路径与脚本分支，
+> 一个拼错的别名不会报错，只会让你在 x86 目录里找不到 rockchip 的产物。
+>
 > **国内网络提示**：脚本里设了 `CURL_OPTIONS="--speed-limit 51200 --speed-time 60"`。
 > curl 默认没有速率下限，一个「能用但极慢」的镜像会让 `make download` **永久卡住**
 > 而不是自动换源；加上这个之后，慢于 50 KB/s 持续 60 秒就放弃该镜像。
@@ -312,7 +428,8 @@ immortalwrt-fusion/
 ├── feeds.conf.append           追加到 ImmortalWrt 的额外 feed
 │
 ├── config/                     ← 可勾选就体现在这里
-│   ├── 00-target.config          目标平台与出哪些镜像
+│   ├── 00-target.config                 目标：x86_64（平台 + 出哪些镜像）
+│   ├── 00-target-rockchip-armv8.config  目标：HT2（RK3528）
 │   ├── 10-base.config            底座层（永远拼进来）
 │   ├── 20-fanchmwrt.config       FanchmWrt 层（勾了才拼）
 │   ├── 30-istoreos.config        iStoreOS 层（勾了才拼）
@@ -323,6 +440,7 @@ immortalwrt-fusion/
 │   ├── 01-fetch.sh               取 ImmortalWrt 源码
 │   ├── 02-feeds.sh               配置并安装 feed（含解除撞名）
 │   ├── 03-overlay.sh             把三个特性层铺进源码树 + 打补丁
+│   ├── 03-target.sh              把**目标层**铺进源码树（HT2 的设备树/U-Boot/board.d）
 │   ├── 04-config.sh              拼 .config、跑 defconfig、**双向断言**
 │   └── 09-verify.sh              编译后核验产物（对照固件真实包列表）
 │
@@ -330,13 +448,42 @@ immortalwrt-fusion/
 │   ├── fanchmwrt/                fwx 内核模块、fwxd、主题、17 个 LuCI 应用
 │   └── istoreos/                 docker-defaults（镜像布局决定的默认值）
 │
-├── overlay/package/            本项目自己的包
-│   └── build-defaults/          承载管理地址与主题锁定，随构建参数生成
+├── overlay/
+│   ├── package/                 本项目自己的包
+│   │   └── build-defaults/      承载管理地址与主题锁定，随构建参数生成
+│   └── target/rockchip-armv8/   目标层数据（HT2）
+│       ├── kernel-patches/        设备树补丁
+│       ├── uboot-patches/         U-Boot 板级支持
+│       ├── image/                 设备定义（追加到 armv8.mk）
+│       ├── uboot/                 U-Boot 目标定义
+│       └── base-files/            LED / 网络 / MAC 的 case 片段
 │
 └── patches/                    定点补丁
     ├── 0002-quickstart-menu-order.patch
     └── 0003-v2ray-geodata-rolling-releases.patch
 ```
+
+### 特性与目标是两件事
+
+这是这套构建器里最值得记住的一条分工：
+
+```
+   特性层（03-overlay.sh）        决定「装什么包」
+     FanchmWrt / iStoreOS / Docker
+              ×                    两者正交，任意组合都成立
+   目标层（03-target.sh）         决定「跑得起来」
+     x86_64 / rockchip-armv8
+```
+
+把目标单独抽出来的原因：x86 与 RK3528 的差别**不在包选集**，而在设备层 ——
+设备树、U-Boot 板级支持，以及 `target/linux` 下那几个按板子分支的文件。
+这些东西既不属于任何特性层，也没法靠 `.config` 里选包来表达。
+
+目标层用**结构化插入**而不是补丁，是因为要改的那四个文件在两棵上游树里内容不一样
+（ImmortalWrt 的 `armv8.mk` 里没有 `hinlink_h28k`，fanchmwrt 那棵树里有），
+而且上游每加一块板子都会变。按上下文匹配的补丁会在上游改动那天失效，
+而失效现场是「编译到一半 patch 报错」—— 排查成本远高于收益。
+所以只认 `esac`、case 的默认分支、设备清单边界这类**结构性**锚点。
 
 ### 三个值得说的设计取舍
 
