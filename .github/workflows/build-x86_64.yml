@@ -124,6 +124,13 @@ jobs:
       # 而不是在一个「能用但极慢」的源上挂几个小时。
       CURL_OPTIONS: --speed-limit 51200 --speed-time 60
 
+      # 目标平台。看着像废话（这个 workflow 只编 x86_64），但它**必须写**：
+      # scripts/09-verify.sh 是独立 step，拿不到 build.sh 那句 export，
+      # 而它要靠 TARGET 拼产物路径。漏掉的后果不是报错得早，而是
+      # 「编译两个半小时全过 → 核验第一行 TARGET: parameter not set」。
+      # build-rockchip.yml 里有对应的一行，两个 workflow 保持对称。
+      TARGET: x86_64
+
     steps:
       # ---------------------------------------------------------------------
       # 构建参数的唯一来源。

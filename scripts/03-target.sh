@@ -60,10 +60,6 @@ SRC="$PROJECT_ROOT/openwrt"
 
 TARGET="${TARGET:-x86_64}"
 
-# 本步铺进去的东西，全部带这个名字的标记；反过来也靠它精确删除。
-MARK_BEGIN="# >>> immortalwrt-fusion/target: rockchip-ht2 begin"
-MARK_END="# <<< immortalwrt-fusion/target: rockchip-ht2 end"
-
 ROCKCHIP_OVERLAY="$PROJECT_ROOT/overlay/target/rockchip-armv8"
 
 # ---------------------------------------------------------------------------

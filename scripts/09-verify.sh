@@ -4,7 +4,8 @@
 #
 # 编译通过只证明「能编出来」，不证明「编出来的东西对」。
 # 这一步拿 scripts/04-config.sh 留下的期望清单，去比对**固件里真实的
-# 软件包列表**（bin/targets/x86/64/*.manifest）—— 那才是最终事实。
+# 软件包列表**（openwrt/bin/targets/<目标>/*.manifest，见 lib.sh 的 target_outdir）
+# —— 那才是最终事实。
 #
 # .config 里写了 y 而被依赖解析丢掉、或者某个包安装了却因为冲突被移除，
 # 都是在这一步才会暴露。
@@ -21,14 +22,33 @@ export PROJECT_ROOT
 
 . "$PROJECT_ROOT/scripts/lib.sh"
 
+# 同一个坑，第二次踩：TARGET 是在 build.sh 里算出来并 export 的，而 CI 里
+# 这一步是**另一个进程**，那句 export 早就不在了。2fc1838 引入 TARGET 之后，
+# x86 的 CI 就一直是「编译两个半小时全过 → 核验第一行挂掉」：
+#     ./scripts/09-verify.sh: 26: TARGET: parameter not set
+# 所以这里必须自己给出与 build.sh / 03-target.sh 相同的默认值，
+# 而不是指望环境里恰好有。
+TARGET=$(normalize_target "${TARGET:-x86_64}")
+
 SRC="$PROJECT_ROOT/openwrt"
 GEN="$PROJECT_ROOT/.generated"
-OUT="$SRC/$(target_outdir "$TARGET")"
 
-[ -d "$OUT" ] || die "没找到产物目录：$OUT"
 [ -f "$GEN/expectations.env" ] || die "没找到期望清单，请先跑 scripts/04-config.sh"
+
+# expectations.env 里也有一个 TARGET，source 会无条件覆盖上面算出来的值。
+# 先记下本次请求的目标，覆盖后不一致就说明这份清单是**另一次构建**留下的。
+#
+# 必须拦这一下，而不是「反正都以文件为准」：清单的目标与产物不是一回事时，
+# 拿 x86 的产物去对 rockchip 的清单（或反过来）会报出一堆看着像真问题的
+# 假问题；更糟的情况是两个目标碰巧都通过，于是没人发现比错了对象。
+_requested_target="$TARGET"
 # shellcheck disable=SC1090
 . "$GEN/expectations.env"
+[ "$TARGET" = "$_requested_target" ] || die "期望清单的目标是 $TARGET，本次要核验的是 $_requested_target
+     —— 清单与产物不是同一次构建的，先按正确的 TARGET 重跑 scripts/04-config.sh。"
+
+OUT="$SRC/$(target_outdir "$TARGET")"
+[ -d "$OUT" ] || die "没找到产物目录：$OUT"
 
 FAILED=0
 note_fail() { warn "$*"; FAILED=1; }
